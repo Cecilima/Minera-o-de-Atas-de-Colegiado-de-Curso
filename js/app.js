@@ -17,14 +17,12 @@ const ICONS = {
    STATE
 ============================================================ */
 const state = {
-  atas:[], chatHistory:[], charts:{}, activeView:'arquivo',
+  atas:[], chatHistory:[], activeView:'arquivo',
   statusFilter:'all', sortKey:'uploadedAt', sortDir:'desc'
 };
 
 /* ============================================================
-   PERSISTÊNCIA LOCAL (localStorage)
-   Este sistema roda como página estática (GitHub Pages), então
-   os dados ficam salvos apenas no navegador de quem usa a página.
+   PERSISTÊNCIA LOCAL
 ============================================================ */
 const STORAGE_KEY = 'arquivo-atas-colegiado:v1';
 function loadAtasFromStorage(){
@@ -35,7 +33,7 @@ function loadAtasFromStorage(){
 }
 function saveAtasToStorage(){
   try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(state.atas)); }
-  catch(e){ console.error('Falha ao salvar no localStorage', e); toast('Não foi possível salvar os dados localmente (armazenamento cheio ou bloqueado).', true); }
+  catch(e){ console.error('Falha ao salvar no localStorage', e); toast('Não foi possível guardar os dados localmente.', true); }
 }
 
 const QUESTION_SUGGESTIONS = [
@@ -44,9 +42,19 @@ const QUESTION_SUGGESTIONS = [
   "Quais prazos vencem em breve?",
   "Quais problemas foram relatados com mais frequência?"
 ];
+
 const STOPWORDS = new Set(("de da do das dos em no na nos nas um uma uns umas e ou a o as os que se para por com sem sobre "+
  "quais qual quando onde quem como foi foram é são ser está estão tem têm ainda mais menos entre até desde já não sim seu sua seus suas "+
- "este esta esse essa aquele aquela isso isto aos às pelo pela pelos pelas nosso nossa nossos nossas qualquer").split(" "));
+ "este esta esse essa aquele aquela isso isto aos às pelo pela pelos pelas nosso наша nossos nossas qualquer "+
+ "ata atas reunião ordinária extraordinária colegiado curso bacharelado licenciatura alunos aluno aluna alunas professor professora prof profa "+
+ "presidente presentes presente ausentes ausente justificada aprovação pauta período discente docente universidade silva santos oliveira pereira costa "+
+ "aprovado reprovado unanimidade membros membro coordenador coordenadora coordenação departamento centro setor assinado assinada assinatura "+
+ "documento processo requerimento pedido solicitação parecer favorável contrário voto votação relato relator relatora assunto assuntos "+
+ "decisão decisões encaminhamento encaminhamentos prazo prazos responsável responsáveis data local horário horas abertura encerramento "+
+ "lista após palavra todos todas outros outras termo termos "+
+ "ausência federal estado unirio geiza jobson massollar atividade atividades disciplina disciplinas abril janeiro fevereiro março maio junho julho agosto setembro outubro novembro dezembro "+
+ "ensino pesquisa extensão projeto projetos carga horária semestre letivo matriz curricular dia mês ano pautas informes ordem assinam "+
+ "instituto superior campus reitoria resolução portaria lei artigo inciso conforme considerando resolve referentes").split(" "));
 
 /* ============================================================
    BOOTSTRAP
@@ -127,7 +135,8 @@ function switchView(view){
   state.activeView = view;
   document.querySelectorAll('.tab-btn').forEach(b=> b.setAttribute('aria-selected', String(b.dataset.view===view)));
   document.querySelectorAll('.view').forEach(v=> v.classList.toggle('active', v.id==='view-'+view));
-  if(view==='painel') renderCharts();
+
+  if(view==='painel') renderDashboard();
   if(view==='responsaveis') renderResponsaveis();
 }
 
@@ -149,14 +158,14 @@ function moveTooltip(evt){
 function hideTooltip(){ document.getElementById('tooltip').classList.remove('show'); }
 
 /* ============================================================
-    FILE HANDLING + EXTRACTION
+   FILE HANDLING + EXTRACTION
 ============================================================ */
 async function handleFiles(fileList){
   const files = Array.from(fileList).filter(f=>{
     const n = f.name.toLowerCase();
     return n.endsWith('.pdf') || n.endsWith('.txt') || f.type==='application/pdf' || f.type==='text/plain';
   });
-  if(!files.length){ toast('Selecione arquivos PDF ou TXT.', true); return; }
+  if(!files.length){ toast('Selecione ficheiros PDF ou TXT.', true); return; }
   for(const file of files){ await processFile(file); }
 }
 
@@ -199,13 +208,14 @@ async function extractPdfText(file){
 }
 
 /* ============================================================
-   ANÁLISE (extração heurística local, sem serviços externos)
+   ANÁLISE
 ============================================================ */
 async function analyzeText(text, filename){
   return heuristicExtract(text, filename);
 }
 
 const MESES = {janeiro:'01',fevereiro:'02','março':'03',marco:'03',abril:'04',maio:'05',junho:'06',julho:'07',agosto:'08',setembro:'09',outubro:'10',novembro:'11',dezembro:'12'};
+const ABREV_RE = /\b(Prof|Profa|Prof[ªa]|Sr|Sra|Dr|Dra|Art|nº|n°|Exmo|Exma|etc|Av|Rua)\./gi;
 
 function findMeetingDate(text){
   const m1 = text.match(/\b(\d{1,2})\s*(?:de)?\s*([a-zç]+)\s+de\s+(\d{4})\b/i);
@@ -215,27 +225,82 @@ function findMeetingDate(text){
   return null;
 }
 
-function findReuniao(lines){
-  for(const l of lines.slice(0,40)){
-    if(/reuni[ãa]o\s+(ordin[áa]ria|extraordin[áa]ria)/i.test(l) && l.length<160) return l;
-    if(/^ata\s+(da|de|do)\s+/i.test(l) && l.length<160) return l;
-  }
-  return null;
+function findReuniao(text){
+  const mTitle = text.match(/\d+ª?\s*Reuni[ãa]o\s+(?:Ordin[áa]ria|Extraordin[áa]ria)(?:\s+\d{4}(?:\.\d+)?)?/i);
+  const mCurso = text.match(/Colegiado do Curso de[^\n]*?(?=\s+\d{1,2}\s+de\s+[a-zçãéíóú]+\s+de\s+\d{4}\b)/i) ||
+                 text.match(/Colegiado do Curso de[^.\n]{0,80}/i);
+  if(mTitle && mCurso) return (mTitle[0].trim()+' — '+mCurso[0].trim()).replace(/\s+/g,' ');
+  if(mTitle) return mTitle[0].trim();
+  if(mCurso) return mCurso[0].trim().replace(/\s+/g,' ');
+  const alt = text.match(/Ata\s+d[ao]\s+[^.\n]{0,80}/i);
+  return alt ? alt[0].trim().replace(/\s+/g,' ') : null;
 }
 
-// tenta capturar um nome próprio logo após marcadores de responsabilidade
+function splitSentences(text){
+  const protectedText = text.replace(ABREV_RE, m => m.slice(0,-1)+'§');
+  const raw = protectedText.split(/(?<=[.!?])\s+(?=[A-ZÀ-Ú0-9"“(])/);
+  return raw.map(s => s.replace(/§/g,'.').trim()).filter(Boolean);
+}
+
+/* ============================================================
+   NOME / RESPONSÁVEL  (REESCRITO)
+============================================================
+   Antes, os regex tinham a flag /i junto com [A-ZÀ-Ú] — o /i
+   neutralizava a exigência de maiúscula e o padrão "engolia"
+   as palavras seguintes (verbos, conjunções, etc.), produzindo
+   nomes do tipo "Felipe concordaram e".
+
+   Agora:
+   • O gatilho ("responsável", "sob responsabilidade", "Prof."…)
+     é escrito à mão com classes [Rr], [Ss], [Pp]… — insensível
+     a maiúsculas só no gatilho.
+   • O NOME só aceita palavras com inicial MAIÚSCULA (sem /i),
+     permitindo partículas minúsculas legítimas no meio
+     (de, da, do, das, dos).
+   • cleanName() remove caudas que claramente não são nome.
+============================================================ */
+
+// Bloco reutilizável: "Palavra" seguida de 0–4 palavras (partículas ou outra Palavra).
+// Sem /i, então [A-ZÀ-Ú] realmente exige maiúscula.
+const NAME_PATTERN =
+  "[A-ZÀ-Ú][\\wà-úÀ-Ú.'-]*(?:\\s+(?:d[aeo]s?|[A-ZÀ-Ú][\\wà-úÀ-Ú.'-]*)){0,4}";
+
+const RESP_EXPLICIT_PATTERNS = [
+  new RegExp("[Rr]espons[áa]vel\\s*(?:pel[ao])?\\s*:?\\s*(" + NAME_PATTERN + ")"),
+  new RegExp("[Ss]ob\\s+responsabilidade\\s+d[eo]\\s+(" + NAME_PATTERN + ")"),
+  new RegExp("[Aa]\\s+cargo\\s+d[eo]\\s+(" + NAME_PATTERN + ")"),
+  new RegExp("[Cc]oordenad[oa]\\s+por\\s+(" + NAME_PATTERN + ")")
+];
+
+const TITLE_NAME_PATTERN = new RegExp(
+  "\\b(?:[Pp]rof(?:essor[a]?)?[ªa°]?\\.?|[Cc]oordenador[a]?\\.?|[Dd]iretor[a]?\\.?)\\s+(" +
+  NAME_PATTERN + ")"
+);
+
+// Caudas que nunca fazem parte de um nome humano — usadas para limpar
+// sobras defensivamente caso algum PDF estranho quebre as regras.
+const NAME_TAIL_STOP = /^(?:e|ou|que|como|para|por|com|sem|sobre|de|da|do|das|dos|em|no|na|nos|nas|ao|aos|à|às|é|são|foi|foram|será|serão|est[áã]|est[ãa]o|inform(ou|aram)|relat(ou|aram)|explic(ou|aram)|concord(ou|aram)|apresent(ou|aram)|solicit(ou|aram)|prop[ôo]s|suger(iu|iram)|decid(iu|iram)|aprov(ou|aram)|encaminh(ou|aram))$/i;
+
 function findResponsavel(sentence){
-  const patterns = [
-    /respons[áa]vel\s*(?:pel[ao])?\s*:?\s*([A-ZÀ-Ú][\wà-úÀ-Ú.'-]*(?:\s+[A-ZÀ-Ú][\wà-úÀ-Ú.'-]*){0,4})/,
-    /sob\s+responsabilidade\s+d[eo]\s+([A-ZÀ-Ú][\wà-úÀ-Ú.'-]*(?:\s+[A-ZÀ-Ú][\wà-úÀ-Ú.'-]*){0,4})/,
-    /a\s+cargo\s+d[eo]\s+([A-ZÀ-Ú][\wà-úÀ-Ú.'-]*(?:\s+[A-ZÀ-Ú][\wà-úÀ-Ú.'-]*){0,4})/,
-    /coordenad[oa]\s+por\s+([A-ZÀ-Ú][\wà-úÀ-Ú.'-]*(?:\s+[A-ZÀ-Ú][\wà-úÀ-Ú.'-]*){0,4})/
-  ];
-  for(const re of patterns){ const m = sentence.match(re); if(m) return m[1].trim().replace(/[.,;:]$/,''); }
+  for(const re of RESP_EXPLICIT_PATTERNS){
+    const m = sentence.match(re);
+    if(m) return cleanName(m[1]);
+  }
+  const mTitle = sentence.match(TITLE_NAME_PATTERN);
+  if (mTitle) return cleanName(mTitle[1]);
   return null;
 }
 
-// tenta capturar uma data/prazo textual
+function cleanName(n){
+  if(!n) return null;
+  let name = n.trim().replace(/[.,;:]+$/,'');
+  // Defensivo: corta palavras finais que claramente não são nome.
+  const parts = name.split(/\s+/);
+  while(parts.length > 1 && NAME_TAIL_STOP.test(parts[parts.length-1])) parts.pop();
+  name = parts.join(' ').replace(/[.,;:]+$/,'').trim();
+  return name || null;
+}
+
 function findPrazo(sentence){
   const m1 = sentence.match(/prazo\s*(?:de|final|:)?\s*(?:at[ée]\s*)?(\d{2}[\/\-]\d{2}[\/\-]\d{2,4})/i);
   if(m1) return m1[1];
@@ -246,21 +311,28 @@ function findPrazo(sentence){
   return null;
 }
 
+const DECISION_VERB_RE = /\b(aprovad[oa]s?|reprovad[oa]s?|deferid[oa]s?|indeferid[oa]s?|decidiu-se|aprovou-se|deliberou-se|homologad[oa]s?)\b/i;
+
 function heuristicExtract(text, filename){
   const lower = text.toLowerCase();
-  const lines = text.split(/\n+/).map(l=>l.trim()).filter(Boolean);
   const data = findMeetingDate(text);
-  const reuniao = findReuniao(lines);
+  const reuniao = findReuniao(text);
 
+  const sentences = splitSentences(text.replace(/\n+/g, ' '));
   const decisoes=[], encaminhamentos=[], problemas=[];
-  lines.forEach(l=>{
-    const ll = l.toLowerCase();
-    if(l.length<8 || l.length>400) return;
-    const responsavel = findResponsavel(l);
-    const prazo = findPrazo(l);
-    if(/decidiu|decidiram|ficou decidido|aprovou-se|foi aprovad/.test(ll)) decisoes.push({descricao:l, responsavel, prazo});
-    else if(/encaminh/.test(ll)) encaminhamentos.push({descricao:l, responsavel, prazo});
-    else if(/problema|dificuldade|pend[êe]ncia|demanda/.test(ll)) problemas.push(l);
+  sentences.forEach(s=>{
+    if(s.length<8 || s.length>700) return;
+    const ll = s.toLowerCase();
+    const responsavel = findResponsavel(s);
+    const prazo = findPrazo(s);
+
+    if(DECISION_VERB_RE.test(s)) {
+      decisoes.push({descricao:s, responsavel, prazo});
+    } else if(/\b(encaminh|providenciar|solicitad[oa]|solicitou)\b/i.test(ll)) {
+      encaminhamentos.push({descricao:s, responsavel, prazo});
+    } else if(/problema|dificuldade|pend[êe]ncia|demanda|preocupa[çc][ãa]o/.test(ll)) {
+      problemas.push(s);
+    }
   });
 
   const freq={};
@@ -269,6 +341,7 @@ function heuristicExtract(text, filename){
 
   const decisoesOut = decisoes.slice(0,30), encaminhamentosOut = encaminhamentos.slice(0,30);
   const degraded = (decisoesOut.length + encaminhamentosOut.length) === 0;
+
   return {
     reuniao, data, assuntos:termosRecorrentes.slice(0,8).map(t=>t.termo),
     decisoes:decisoesOut, encaminhamentos:encaminhamentosOut, problemas:problemas.slice(0,15),
@@ -282,7 +355,7 @@ function heuristicExtract(text, filename){
 function renderBanners(){
   const el = document.getElementById('banners');
   if(!state.atas.length){
-    el.innerHTML = '<div class="banner">'+ICONS.info+'<div><strong>Como funciona:</strong> a extração de assuntos, decisões, encaminhamentos, responsáveis e prazos é feita localmente no navegador, por palavras-chave — os arquivos não são enviados a nenhum servidor. Revise sempre os resultados na tela de detalhe de cada ata.</div></div>';
+    el.innerHTML = '<div class="banner">'+ICONS.info+'<div><strong>Como funciona:</strong> a extração de assuntos, decisões, encaminhamentos, responsáveis e prazos é feita localmente no navegador, por palavras-chave — os ficheiros não são enviados para nenhum servidor. Revise sempre os resultados na tela de detalhe.</div></div>';
   }else{
     el.innerHTML = '';
   }
@@ -301,18 +374,18 @@ function renderHero(){
   const lbl = document.getElementById('hero-lbl-text');
   const pending = document.querySelectorAll('#ata-tbody tr.pending').length;
   if(pending>0){
-    lbl.textContent = 'PROCESSANDO AGORA';
+    lbl.textContent = 'A PROCESSAR';
     pulse.style.display='block';
   }else{
     lbl.textContent = 'RESUMO DO ARQUIVO';
-    pulse.style.display = state.atas.length ? 'none' : 'none';
+    pulse.style.display = 'none';
   }
   if(!state.atas.length){ list.innerHTML = '<div class="now-empty">Nenhuma ata enviada ainda.</div>'; return; }
   const decisions = state.atas.reduce((n,a)=>n+(a.analysis?.decisoes||[]).length,0);
   const encs = state.atas.reduce((n,a)=>n+(a.analysis?.encaminhamentos||[]).length,0);
   list.innerHTML = [
     ['n', state.atas.length, 'atas no arquivo'],
-    ['n', decisions, 'decisões registradas'],
+    ['n', decisions, 'decisões registadas'],
     ['n', encs, 'encaminhamentos em aberto']
   ].map(([,n,l])=>'<div class="now-row"><span class="n">'+n+'</span><span class="l">'+l+'</span></div>').join('');
 }
@@ -321,7 +394,7 @@ function addPendingRow(id, name){
   const tbody = document.getElementById('ata-tbody');
   const tr = document.createElement('tr');
   tr.className = 'pending'; tr.id = id;
-  tr.innerHTML = '<td colspan="7"><div class="processing-flag"><span class="spin"></span> analisando <strong>'+escapeHtml(name)+'</strong>…</div></td>';
+  tr.innerHTML = '<td colspan="7"><div class="processing-flag"><span class="spin"></span> a analisar <strong>'+escapeHtml(name)+'</strong>…</div></td>';
   tbody.prepend(tr);
   renderHero();
 }
@@ -344,7 +417,6 @@ function sortValue(a, key){
   if(key==='encaminhamentos') return (a.analysis?.encaminhamentos||[]).length;
   return a[key];
 }
-// itens sem valor (null/vazio) sempre vão para o fim da lista, em qualquer direção de ordenação
 function compareSortValues(va, vb, dir){
   const aEmpty = va===null || va===undefined || va==='';
   const bEmpty = vb===null || vb===undefined || vb==='';
@@ -382,7 +454,7 @@ function renderAtaTable(){
       '<td class="nome-cell"><span class="nm">'+escapeHtml(a.filename)+'</span><span class="sub">'+escapeHtml(a.reuniao||'Reunião não identificada')+'</span></td>'+
       '<td>'+escapeHtml(a.reuniao||'—')+'</td>'+
       '<td>'+(a.data ? '<span class="sec-tag date">'+fmtDate(a.data)+'</span>' : '<span class="sec-tag">sem data</span>')+
-        (a.status==='parcial' ? ' <span class="sec-tag warn" title="Extração básica, sem IA">parcial</span>' : '')+'</td>'+
+        (a.status==='parcial' ? ' <span class="sec-tag warn" title="Extração básica">parcial</span>' : '')+'</td>'+
       '<td class="count-cell">'+decCount+'</td>'+
       '<td class="count-cell">'+encCount+'</td>'+
       '<td class="sub" style="color:var(--slate);">'+fmtDateShort(a.uploadedAt)+'</td>'+
@@ -400,7 +472,7 @@ function renderAtaTable(){
 }
 
 function deleteAta(a){
-  if(!confirm('Excluir "'+a.filename+'" do arquivo? Essa ação não pode ser desfeita.')) return;
+  if(!confirm('Excluir "'+a.filename+'" do arquivo? Esta ação não pode ser desfeita.')) return;
   try{
     state.atas = state.atas.filter(x=>x.id!==a.id);
     saveAtasToStorage();
@@ -410,40 +482,48 @@ function deleteAta(a){
 }
 
 /* ============================================================
-   DRAWER (detalhe da ata)
+   DRAWER
 ============================================================ */
 function openDrawer(a){
   const d = document.getElementById('drawer');
   const an = a.analysis || {};
   const listOrEmpty = (arr, render) => arr && arr.length ? arr.map(render).join('') : '<p class="muted">Nada identificado.</p>';
 
+  const responsaveisSet = new Set();
+  const prazosSet = new Set();
+  (an.decisoes||[]).forEach(item => { if(item.responsavel) responsaveisSet.add(item.responsavel); if(item.prazo) prazosSet.add(item.prazo); });
+  (an.encaminhamentos||[]).forEach(item => { if(item.responsavel) responsaveisSet.add(item.responsavel); if(item.prazo) prazosSet.add(item.prazo); });
+  const respList = Array.from(responsaveisSet);
+  const prazoList = Array.from(prazosSet);
+
   d.innerHTML =
     '<div class="drawer-head">'+
       '<button class="icon-btn drawer-close" id="drawer-close">'+ICONS.close+'</button>'+
       '<div class="dh-kicker">DETALHE DA ATA</div>'+
       '<h3>'+escapeHtml(a.reuniao || a.filename)+'</h3>'+
-      '<div class="dh-meta">'+escapeHtml(a.filename)+' · '+(a.data ? fmtDate(a.data) : 'data não identificada')+' · enviado em '+fmtDateTime(a.uploadedAt)+'</div>'+
+      '<div class="dh-meta">'+escapeHtml(a.filename)+' · '+(a.data ? fmtDate(a.data) : 'data não identificada')+' · enviada a '+fmtDateTime(a.uploadedAt)+'</div>'+
     '</div>'+
     '<div class="drawer-body">'+
       '<h5>Assuntos</h5><div class="tag-list">'+
         (an.assuntos&&an.assuntos.length ? an.assuntos.map(s=>'<span class="tag">'+escapeHtml(s)+'</span>').join('') : '<p class="muted">Nada identificado.</p>')+
       '</div>'+
-
+      '<h5>Responsáveis Citados</h5><div class="tag-list">'+
+        (respList.length ? respList.map(r=>'<span class="tag" style="background:var(--teal-soft);color:var(--teal-deep);">'+escapeHtml(r)+'</span>').join('') : '<p class="muted">Nenhum responsável explícito identificado.</p>')+
+      '</div>'+
+      '<h5>Prazos Definidos</h5><div class="tag-list">'+
+        (prazoList.length ? prazoList.map(p=>'<span class="tag" style="background:var(--amber-soft);color:var(--amber-deep);">'+escapeHtml(p)+'</span>').join('') : '<p class="muted">Nenhum prazo identificado.</p>')+
+      '</div>'+
       '<h5>Decisões ('+(an.decisoes?an.decisoes.length:0)+')</h5>'+
       listOrEmpty(an.decisoes, dcs=>'<div class="item-card"><span class="chip dec">DECISÃO</span><div class="desc" style="margin-top:7px;">'+escapeHtml(dcs.descricao)+'</div><div class="tags">'+
         (dcs.responsavel?'<span>responsável: '+escapeHtml(dcs.responsavel)+'</span>':'')+(dcs.prazo?'<span>prazo: '+escapeHtml(dcs.prazo)+'</span>':'')+'</div></div>')+
-
       '<h5>Encaminhamentos ('+(an.encaminhamentos?an.encaminhamentos.length:0)+')</h5>'+
       listOrEmpty(an.encaminhamentos, dcs=>'<div class="item-card"><span class="chip enc">ENCAM.</span><div class="desc" style="margin-top:7px;">'+escapeHtml(dcs.descricao)+'</div><div class="tags">'+
         (dcs.responsavel?'<span>responsável: '+escapeHtml(dcs.responsavel)+'</span>':'')+(dcs.prazo?'<span>prazo: '+escapeHtml(dcs.prazo)+'</span>':'')+'</div></div>')+
-
       '<h5>Problemas / demandas</h5>'+
       (an.problemas&&an.problemas.length ? '<ul>'+an.problemas.map(p=>'<li>'+escapeHtml(p)+'</li>').join('')+'</ul>' : '<p class="muted">Nada identificado.</p>')+
-
       '<h5>Termos recorrentes</h5><div class="tag-list">'+
         (an.termosRecorrentes&&an.termosRecorrentes.length ? an.termosRecorrentes.map(t=>'<span class="tag">'+escapeHtml(t.termo)+' · '+t.contagem+'</span>').join('') : '<p class="muted">Nada identificado.</p>')+
       '</div>'+
-
       '<h5>Texto extraído</h5><details><summary>Mostrar texto</summary><div class="raw-text" style="margin-top:10px;">'+escapeHtml((a.textExcerpt||'').slice(0,20000))+'</div></details>'+
     '</div>';
 
@@ -486,7 +566,7 @@ function renderResponsaveis(){
     return;
   }
   if(!all.length){
-    el.innerHTML = '<div class="empty-state">'+ICONS.archive+'<div class="t">Nenhum responsável identificado</div><div class="d">As atas enviadas não mencionam responsáveis de forma explícita (ex: "responsável: fulano").</div></div>';
+    el.innerHTML = '<div class="empty-state">'+ICONS.archive+'<div class="t">Nenhum responsável identificado</div><div class="d">As atas enviadas não mencionam responsáveis de forma explícita.</div></div>';
     return;
   }
   if(!list.length){
@@ -559,16 +639,6 @@ function themeFrequency(atas){
   atas.forEach(a=> (a.analysis?.assuntos||[]).forEach(t=>{ const k=t.trim().toLowerCase(); if(!k) return; map[k]=map[k]||{label:t.trim(),count:0}; map[k].count++; }));
   return Object.values(map).sort((a,b)=>b.count-a.count);
 }
-function themeEvolution(atas, topN){
-  const freq = themeFrequency(atas).slice(0,topN);
-  const themeKeys = freq.map(f=>f.label.toLowerCase());
-  const months = Array.from(new Set(atas.map(a=>monthKey(a.data||a.uploadedAt)).filter(Boolean))).sort();
-  const series = themeKeys.map((key,i)=>{
-    const counts = months.map(mo => atas.filter(a=>{ const amk=monthKey(a.data||a.uploadedAt); if(amk!==mo) return false; return (a.analysis?.assuntos||[]).some(t=>t.trim().toLowerCase()===key); }).length);
-    return {label:freq[i].label, data:counts};
-  });
-  return {months, series};
-}
 function decisionsByPeriod(atas){
   const map = {};
   atas.forEach(a=>{ const mo=monthKey(a.data||a.uploadedAt); if(!mo) return; map[mo]=(map[mo]||0)+(a.analysis?.decisoes||[]).length; });
@@ -606,10 +676,9 @@ function renderDashboard(){
   document.getElementById('painel-content').style.display = has? 'block':'none';
   if(!has) return;
   renderKpiRow();
-  renderRankList();
+  renderHtmlCharts();
   renderTimeline();
   renderNetwork();
-  if(state.activeView==='painel') renderCharts();
 }
 
 function renderKpiRow(){
@@ -619,23 +688,70 @@ function renderKpiRow(){
   const themes = themeFrequency(atas).length;
   const dates = atas.map(a=>a.data).filter(Boolean).sort();
   const period = dates.length ? fmtDate(dates[0])+' – '+fmtDate(dates[dates.length-1]) : '—';
-  const cards = [['Atas analisadas', atas.length], ['Decisões registradas', decisions], ['Encaminhamentos', encs], ['Temas distintos', themes], ['Período coberto', period]];
+  const cards = [['Atas analisadas', atas.length], ['Decisões registadas', decisions], ['Encaminhamentos', encs], ['Temas distintos', themes], ['Período coberto', period]];
   document.getElementById('kpi-row').innerHTML = cards.map(([l,n])=> '<div class="kpi"><div class="n">'+n+'</div><div class="l">'+l+'</div></div>').join('');
 }
 
-function renderRankList(){
-  const freq = themeFrequency(state.atas).slice(0,10);
-  const max = freq.length ? freq[0].count : 1;
-  const el = document.getElementById('rank-list');
-  if(!freq.length){ el.innerHTML = '<p class="muted">Sem dados.</p>'; return; }
-  el.innerHTML = freq.map((f,i)=>
-    '<div class="rank-row" data-i="'+i+'"><span class="name">'+escapeHtml(f.label)+'</span>'+
-    '<span class="bar-bg"><span class="bar-fill" style="width:'+Math.round(f.count/max*100)+'%"></span></span>'+
-    '<span class="n">'+f.count+'</span></div>').join('');
-  el.querySelectorAll('.rank-row').forEach((row,i)=>{
-    row.addEventListener('mousemove', e=> showTooltip(e, '<b>'+escapeHtml(freq[i].label)+'</b><br>mencionado em '+freq[i].count+' ata(s)') || moveTooltip(e));
-    row.addEventListener('mouseleave', hideTooltip);
-  });
+/* ============================================================
+   RENDER BARRA LARANJA (cor padrão do painel)
+============================================================ */
+const BAR_ORANGE = '#E1A03C';        // laranja principal (--amber)
+const BAR_ORANGE_DEEP = '#B97A22';   // laranja escuro (--amber-deep) — alternativa
+
+function renderHtmlBarChart(containerId, dataArray, colorHex = BAR_ORANGE) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    if (!dataArray || !dataArray.length) {
+        el.innerHTML = '<p class="muted">Sem dados.</p>';
+        return;
+    }
+    const max = Math.max(...dataArray.map(d => d.count), 1);
+    el.innerHTML = dataArray.map((d, i) => {
+        const pct = Math.max(2, Math.round((d.count / max) * 100)); // min 2% para ficar visível
+        return `
+            <div class="rank-row" data-i="${i}">
+                <span class="name" title="${escapeHtml(d.label)}">${escapeHtml(d.label)}</span>
+                <span class="bar-bg"><span class="bar-fill" style="width:${pct}%; background:${colorHex};"></span></span>
+                <span class="n">${d.count}</span>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderHtmlCharts(){
+    // Todas as barras do painel saem em LARANJA (--amber)
+    const freq = themeFrequency(state.atas);
+
+    renderHtmlBarChart('chart-freq-html', freq.slice(0, 5), BAR_ORANGE);
+    renderHtmlBarChart('rank-list', freq.slice(0, 10), BAR_ORANGE);
+
+    const dec = decisionsByPeriod(state.atas);
+    const decData = dec.months.map((m, i) => ({ label: monthLabel(m), count: dec.counts[i] }));
+    renderHtmlBarChart('chart-decisions-html', decData, BAR_ORANGE);
+
+    const enc = encaminhamentosPerAta(state.atas);
+    const encData = enc.labels.map((l, i) => ({ label: l, count: enc.counts[i] }));
+    renderHtmlBarChart('chart-encaminhamentos-html', encData, BAR_ORANGE);
+
+    const elEvo = document.getElementById('chart-evolution-html');
+    if(elEvo) {
+        const months = Array.from(new Set(state.atas.map(a=>monthKey(a.data||a.uploadedAt)).filter(Boolean))).sort();
+        if(!months.length) {
+            elEvo.innerHTML = '<p class="muted">Sem dados.</p>';
+        } else {
+            let evoHtml = '';
+            months.forEach(mo => {
+                const atasDoMes = state.atas.filter(a => monthKey(a.data||a.uploadedAt) === mo);
+                const topTemas = themeFrequency(atasDoMes).slice(0, 2);
+                const desc = topTemas.length ? topTemas.map(f => f.label + ' (' + f.count + ')').join(', ') : 'Nenhum tema isolado';
+                evoHtml += `<div class="rank-row" style="grid-template-columns: 80px 1fr 0;">
+                    <span class="name" style="font-weight:700;">${monthLabel(mo)}</span>
+                    <span class="name" style="color:var(--slate);">${escapeHtml(desc)}</span>
+                </div>`;
+            });
+            elEvo.innerHTML = evoHtml;
+        }
+    }
 }
 
 function renderTimeline(){
@@ -684,74 +800,60 @@ function renderNetwork(){
   });
 }
 
-/* ---- Chart.js ---- */
-function renderCharts(){
-  if(!window.Chart || !state.atas.length) return;
-  const css = getComputedStyle(document.documentElement);
-  const inkSoft = css.getPropertyValue('--ink-soft').trim();
-  const line = css.getPropertyValue('--line').trim();
-  const teal = css.getPropertyValue('--teal').trim();
-  const amber = css.getPropertyValue('--amber-deep').trim();
-  const plum = css.getPropertyValue('--plum').trim();
-  const rose = css.getPropertyValue('--rose').trim();
-  const slate = css.getPropertyValue('--slate').trim();
-  const palette = [teal, amber, plum, rose, slate];
-
-  Chart.defaults.font.family = "Manrope, sans-serif";
-  Chart.defaults.color = inkSoft;
-
-  destroyChart('freq'); destroyChart('evolution'); destroyChart('decisions'); destroyChart('encaminhamentos');
-
-  const freq = themeFrequency(state.atas).slice(0,10);
-  state.charts.freq = new Chart(byId('chart-freq'), {
-    type:'bar',
-    data:{ labels:freq.map(f=>f.label), datasets:[{ data:freq.map(f=>f.count), backgroundColor:teal, borderRadius:3, maxBarThickness:22 }] },
-    options:{ indexAxis:'y', plugins:{legend:{display:false}}, scales:{ x:{grid:{color:line}, ticks:{precision:0}}, y:{grid:{display:false}} }, responsive:true, maintainAspectRatio:false }
-  });
-
-  const evo = themeEvolution(state.atas, 5);
-  state.charts.evolution = new Chart(byId('chart-evolution'), {
-    type:'line',
-    data:{ labels:evo.months.map(monthLabel), datasets:evo.series.map((s,i)=>({label:s.label, data:s.data, borderColor:palette[i%palette.length], backgroundColor:'transparent', tension:.3, pointRadius:3})) },
-    options:{ plugins:{legend:{position:'bottom', labels:{boxWidth:10, font:{size:11}}}}, scales:{x:{grid:{display:false}}, y:{grid:{color:line}, ticks:{precision:0}}}, responsive:true, maintainAspectRatio:false }
-  });
-
-  const dec = decisionsByPeriod(state.atas);
-  state.charts.decisions = new Chart(byId('chart-decisions'), {
-    type:'bar',
-    data:{ labels:dec.months.map(monthLabel), datasets:[{data:dec.counts, backgroundColor:amber, borderRadius:3, maxBarThickness:36}] },
-    options:{ plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}, y:{grid:{color:line}, ticks:{precision:0}}}, responsive:true, maintainAspectRatio:false }
-  });
-
-  const enc = encaminhamentosPerAta(state.atas);
-  state.charts.encaminhamentos = new Chart(byId('chart-encaminhamentos'), {
-    type:'bar',
-    data:{ labels:enc.labels, datasets:[{data:enc.counts, backgroundColor:plum, borderRadius:3, maxBarThickness:30}] },
-    options:{ plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}, ticks:{autoSkip:false, maxRotation:35, minRotation:0, font:{size:10}}}, y:{grid:{color:line}, ticks:{precision:0}}}, responsive:true, maintainAspectRatio:false }
-  });
-}
-function byId(id){ return document.getElementById(id).getContext('2d'); }
-function destroyChart(key){ if(state.charts[key]){ state.charts[key].destroy(); delete state.charts[key]; } }
-
 /* ============================================================
-   CONSULTA — busca local por palavras-chave (sem IA/servidor)
+   CONSULTA / CHAT INTELIGENTE
 ============================================================ */
 function answerLocally(question){
-  const qWords = new Set((question.toLowerCase().match(/[a-zà-ú0-9]+/g)||[]).filter(w=>w.length>2 && !STOPWORDS.has(w)));
-  if(!qWords.size) return 'Tente reformular a pergunta com palavras mais específicas (ex: um assunto, um nome ou "prazo", "responsável"…).';
+  const qLower = question.toLowerCase();
 
-  const wantsResp = /respons[áa]ve(l|is)/i.test(question);
-  const wantsPrazo = /prazo/i.test(question);
+  if (qLower.includes("resum") || qLower.includes("principais assuntos")) {
+    const freq = themeFrequency(state.atas).slice(0, 5);
+    if(freq.length) return "Os assuntos mais recorrentes discutidos nas atas são:\n\n" + freq.map(f => `• ${f.label} (${f.count} menções)`).join('\n');
+    return "Ainda não há dados suficientes para gerar um resumo.";
+  }
+
+  if (qLower.includes("não têm responsável") || qLower.includes("sem responsável")) {
+    let res = [];
+    state.atas.forEach(a => {
+        const an = a.analysis || {};
+        [...(an.decisoes||[]), ...(an.encaminhamentos||[])].forEach(item => {
+            if (!item.responsavel) res.push(`• [${a.filename}] ${item.descricao}`);
+        });
+    });
+    if (res.length) return "Aqui estão as decisões e encaminhamentos ainda sem responsável definido:\n\n" + res.slice(0, 10).join('\n\n') + (res.length > 10 ? '\n\n(Exibindo os 10 primeiros)' : '');
+    return "Excelente! Todos os itens identificados possuem um responsável.";
+  }
+
+  if (qLower.includes("prazo") || qLower.includes("vence")) {
+    let res = [];
+    state.atas.forEach(a => {
+        const an = a.analysis || {};
+        [...(an.decisoes||[]), ...(an.encaminhamentos||[])].forEach(item => {
+            if (item.prazo) res.push(`• [${a.filename}] ${item.descricao}\n  Prazo: ${item.prazo}` + (item.responsavel ? ` (Resp: ${item.responsavel})` : ''));
+        });
+    });
+    if(res.length) return "Encontrei os seguintes itens com prazos definidos nas atas:\n\n" + res.slice(0, 8).join('\n\n');
+    return "Não encontrei prazos definidos nas atas enviadas.";
+  }
+
+  if (qLower.includes("problema") || qLower.includes("frequência")) {
+    let res = [];
+    state.atas.forEach(a => {
+        (a.analysis?.problemas||[]).forEach(p => res.push(`• [${a.filename}] ${p}`));
+    });
+    if(res.length) return "Estes foram os problemas ou demandas relatados:\n\n" + res.slice(0, 8).join('\n\n');
+    return "Não identifiquei problemas ou demandas explícitas nas atas.";
+  }
+
+  const qWords = new Set((qLower.match(/[a-zà-ú0-9]+/g)||[]).filter(w=>w.length>2 && !STOPWORDS.has(w)));
+  if(!qWords.size) return 'Tente reformular a pergunta com palavras mais específicas (ex: "prazo", "assunto", "resumo").';
 
   const hits = [];
   state.atas.forEach(a=>{
     const an = a.analysis||{};
     const consider = (list, tipo) => (list||[]).forEach(item=>{
       const desc = item.descricao||item;
-      const hay = String(desc).toLowerCase();
-      let score=0; qWords.forEach(w=>{ if(hay.includes(w)) score++; });
-      if(wantsResp && item.responsavel==null && tipo!=='problema') score -= 0.5;
-      if(wantsPrazo && item.prazo==null && tipo!=='problema') score -= 0.5;
+      let score=0; qWords.forEach(w=>{ if(String(desc).toLowerCase().includes(w)) score++; });
       if(score>0) hits.push({a, tipo, item, score});
     });
     consider(an.decisoes, 'decisão');
@@ -759,20 +861,15 @@ function answerLocally(question){
     consider(an.problemas, 'problema');
   });
   hits.sort((x,y)=>y.score-x.score);
-  const top = hits.slice(0,8);
 
-  if(!top.length){
-    return 'Não encontrei nada nas atas enviadas que corresponda a essa pergunta. Esta é uma busca por palavras-chave local (sem IA) — tente termos que apareçam literalmente no texto das atas, ou confira a aba Painel/Responsáveis.';
-  }
-  const lines = top.map(h=>{
-    const desc = h.item.descricao||h.item;
-    const meta = [];
-    if(h.item.responsavel) meta.push('responsável: '+h.item.responsavel);
-    if(h.item.prazo) meta.push('prazo: '+h.item.prazo);
+  if(!hits.length) return 'Não encontrei trechos exatos. Tente usar termos que apareçam literalmente no texto ou faça perguntas usando os botões de sugestão acima.';
+
+  const lines = hits.slice(0,8).map(h=>{
+    const d = h.item.descricao||h.item;
     const src = h.a.filename+(h.a.data?' — '+fmtDate(h.a.data):'');
-    return '• ['+h.tipo+'] '+desc+(meta.length?' ('+meta.join('; ')+')':'')+'\n  fonte: '+src;
+    return `• [${h.tipo}] ${d}\n  fonte: ${src}`;
   });
-  return 'Encontrei os seguintes trechos relacionados (busca local por palavras-chave, não gerada por IA):\n\n'+lines.join('\n\n');
+  return 'Encontrei os seguintes trechos relacionados nas atas:\n\n'+lines.join('\n\n');
 }
 
 function submitQuestion(){

@@ -8,7 +8,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/styles.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -56,16 +55,16 @@
     <div id="banners"></div>
 
     <div class="section-head">
-      <div><h2>Enviar atas</h2><p class="desc">PDF ou TXT · vários arquivos de uma vez</p></div>
+      <div><h2>Enviar atas</h2><p class="desc">PDF ou TXT · vários ficheiros de uma vez</p></div>
     </div>
     <div class="dropzone tick-corner" id="dropzone">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4 7 9M12 4l5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
-      <p><strong>Clique para escolher arquivos</strong> ou arraste e solte aqui</p>
+      <p><strong>Clique para escolher ficheiros</strong> ou arraste e solte aqui</p>
     </div>
     <input type="file" id="file-input" multiple accept=".pdf,.txt,application/pdf,text/plain">
 
     <div class="section-head" style="margin-top:38px;">
-      <div><h2>Índice de atas</h2><p class="desc">Tudo o que já foi processado — clique em uma linha para ver os detalhes</p></div>
+      <div><h2>Índice de atas</h2><p class="desc">Tudo o que já foi processado — clique numa linha para ver os detalhes</p></div>
       <button class="btn" id="export-btn">
         <svg class="icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3v9m0 0-3.2-3.2M10 12l3.2-3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 14v1.5A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V14"/></svg>
         Exportar JSON
@@ -79,7 +78,7 @@
       </div>
       <div class="table-search">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="9" r="6.2"/><line x1="13.5" y1="13.5" x2="17.5" y2="17.5" stroke-linecap="round"/></svg>
-        <input type="text" id="search-input" placeholder="Buscar por arquivo, reunião ou assunto…">
+        <input type="text" id="search-input" placeholder="Buscar por ficheiro, reunião ou assunto…">
       </div>
       <span class="filter-count" id="filter-count"></span>
     </div>
@@ -87,7 +86,7 @@
       <table class="index-table">
         <thead>
           <tr>
-            <th data-key="filename">Arquivo <span class="sort-arrow">▲</span></th>
+            <th data-key="filename">Ficheiro <span class="sort-arrow">▲</span></th>
             <th data-key="reuniao">Reunião <span class="sort-arrow">▲</span></th>
             <th data-key="data">Data <span class="sort-arrow">▲</span></th>
             <th data-key="decisoes">Decisões <span class="sort-arrow">▲</span></th>
@@ -107,7 +106,7 @@
       <div class="empty-state">
         <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M4 19V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2Z"/><path d="M14 3v5h5"/></svg>
         <div class="t">O painel ainda está vazio</div>
-        <div class="d">Envie ao menos uma ata na aba Arquivo para gerar as visualizações.</div>
+        <div class="d">Envie pelo menos uma ata na aba Arquivo para gerar as visualizações.</div>
       </div>
     </div>
 
@@ -118,29 +117,39 @@
         <div class="chart-panel">
           <h3>Frequência dos temas</h3>
           <p class="chart-sub">Quantas atas mencionam cada assunto</p>
-          <div class="chart-wrap"><canvas id="chart-freq"></canvas></div>
+          <div class="chart-wrap">
+            <div class="rank-list" id="chart-freq-html"></div>
+          </div>
         </div>
         <div class="chart-panel">
           <h3>Assuntos mais recorrentes</h3>
-          <p class="chart-sub">Ranking por número de menções</p>
-          <div class="rank-list" id="rank-list"></div>
+          <p class="chart-sub">Ranking por número de menções globais</p>
+          <div class="chart-wrap">
+            <div class="rank-list" id="rank-list"></div>
+          </div>
         </div>
 
         <div class="chart-panel">
-          <h3>Evolução dos temas ao longo do tempo</h3>
-          <p class="chart-sub">Top 5 assuntos, por mês da reunião</p>
-          <div class="chart-wrap"><canvas id="chart-evolution"></canvas></div>
+          <h3>Evolução dos temas (Principais do mês)</h3>
+          <p class="chart-sub">Temas em destaque agrupados por mês</p>
+          <div class="chart-wrap">
+             <div class="rank-list" id="chart-evolution-html"></div>
+          </div>
         </div>
         <div class="chart-panel">
           <h3>Decisões por período</h3>
           <p class="chart-sub">Decisões formalizadas, agrupadas por mês</p>
-          <div class="chart-wrap"><canvas id="chart-decisions"></canvas></div>
+          <div class="chart-wrap">
+             <div class="rank-list" id="chart-decisions-html"></div>
+          </div>
         </div>
 
         <div class="chart-panel">
           <h3>Quantidade de encaminhamentos</h3>
-          <p class="chart-sub">Por ata</p>
-          <div class="chart-wrap"><canvas id="chart-encaminhamentos"></canvas></div>
+          <p class="chart-sub">Por ata processada</p>
+          <div class="chart-wrap">
+             <div class="rank-list" id="chart-encaminhamentos-html"></div>
+          </div>
         </div>
         <div class="chart-panel">
           <h3>Rede de relacionamento entre temas</h3>
@@ -150,7 +159,7 @@
 
         <div class="chart-panel full">
           <h3>Linha do tempo das decisões</h3>
-          <p class="chart-sub">Todas as decisões registradas, em ordem cronológica</p>
+          <p class="chart-sub">Todas as decisões registadas, em ordem cronológica</p>
           <div class="timeline" id="timeline"></div>
         </div>
       </div>
@@ -160,7 +169,7 @@
   <!-- ================= RESPONSÁVEIS ================= -->
   <section class="view" id="view-responsaveis" role="tabpanel">
     <div class="section-head">
-      <div><h2>Responsáveis</h2><p class="desc">Decisões e encaminhamentos agrupados por responsável identificado nas atas</p></div>
+      <div><h2>Responsáveis</h2><p class="desc">Decisões e encaminhamentos agrupados por responsável</p></div>
     </div>
     <div class="filter-bar">
       <div class="table-search">
@@ -198,7 +207,7 @@
 
 <footer class="wrap">
   <div class="foot-row">
-    <p>Os dados ficam salvos no seu navegador (armazenamento local) e a análise das atas é feita localmente, sem envio a servidores externos.</p>
+    <p>Os dados ficam guardados no seu navegador (armazenamento local) e a análise das atas é feita localmente, sem envio a servidores externos.</p>
   </div>
 </footer>
 
