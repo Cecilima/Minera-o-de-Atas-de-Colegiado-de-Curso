@@ -9,10 +9,12 @@ palavras-chave.
 ## Estrutura
 
 ```
-index.html      → marcação da página (4 abas: Arquivo, Painel, Responsáveis, Consulta)
-css/styles.css  → todo o estilo visual (tema único, claro)
-js/app.js       → toda a lógica: upload, extração, análise, gráficos, busca
-README.md       → este arquivo
+index.html       → marcação da página (4 abas: Arquivo, Painel, Responsáveis, Consulta)
+css/styles.css   → todo o estilo visual (tema único, claro)
+js/extractor.js  → motor de extração das atas (puro, sem DOM; roda no navegador e no Node)
+js/app.js        → interface: upload, tabela, gaveta de detalhes, gráficos, busca, consulta
+tests/           → testes do extrator (node tests/frases.js · node tests/run.js ata1-numerada.txt)
+README.md        → este arquivo
 ```
 
 ## Como funciona (importante)
@@ -22,13 +24,27 @@ Pages**, ou seja, sem nenhum servidor por trás. Por isso:
 
 - **Extração de texto**: PDFs são lidos no navegador com `pdf.js`; TXT é
   lido diretamente.
-- **Análise (assuntos, decisões, encaminhamentos, responsáveis, prazos,
-  termos recorrentes)**: feita por regras e expressões regulares em
-  JavaScript, no próprio navegador — não há chamada a nenhuma IA externa.
-  A qualidade da extração depende de as atas usarem expressões como
-  "decidiu-se", "ficou encaminhado", "responsável: Fulano", "prazo até
-  dd/mm/aaaa" etc. Sempre revise os resultados na tela de detalhe de cada
-  ata (clique na linha da tabela).
+- **Análise**: feita no próprio navegador por `js/extractor.js`, sem IA externa.
+  Em vez de procurar palavras soltas, o extrator segue este pipeline:
+  1. normaliza o texto (preservando quebras de linha, removendo números de página e rodapés repetidos);
+  2. identifica a estrutura da ata — pauta, itens numerados ("1.", "Item 2"), títulos em maiúsculas,
+     títulos com dois-pontos ou texto corrido — e divide em blocos;
+  3. **assuntos** vêm só de evidência estrutural (pauta, cabeçalhos, frases como "tratou-se de…").
+     Se não houver evidência, o assunto fica *não identificado* — nunca é inventado a partir de palavras frequentes;
+  4. dentro de cada bloco, cada sentença é pontuada por **padrões linguísticos** para
+     decisão, encaminhamento, problema, demanda e sugestão/proposta (ver abaixo);
+  5. para cada encaminhamento relaciona **ação + responsável + prazo/referência temporal**;
+  6. **termos recorrentes** são calculados à parte, independentes dos assuntos;
+  7. remove duplicidades e atribui um nível de **confiança** (alta/média/baixa) a cada item.
+- **Decisão × sugestão × encaminhamento**: "foi aprovado…", "ficou definido que…", "deliberou-se…",
+  "o colegiado decidiu…" e resultados de votação são decisões. "Sugeriu que fosse aprovada", "seria
+  interessante…", "caso seja aprovado…", "conforme aprovado na reunião anterior" e alunos "aprovados" **não** são.
+  Encaminhamento é detectado por estrutura (ex.: "X ficará responsável por…", "deverá…", "irá…",
+  "será realizada…", "se comprometeu a…"), sem depender da palavra "encaminhamento".
+- **Prazos e referências temporais**: datas absolutas, períodos ("2026.2", "no próximo semestre"),
+  datas relativas ("nas próximas semanas"), eventos ("antes da prova"), reuniões ("na próxima reunião")
+  e expressões vagas ("o quanto antes"). Referências relativas são preservadas como no texto; quando há
+  uma data ligada ao evento ("antes da prova, marcada para 29/11/2026") ela vem como *data associada*.
 - **Persistência**: os dados ficam salvos no `localStorage` do navegador
   de quem está usando a página. Ou seja, cada pessoa que abre a página
   vê apenas as atas que ela mesma enviou naquele navegador — nada é
@@ -43,15 +59,15 @@ Se no futuro você quiser uma análise mais rica (com um modelo de
 linguagem de verdade), será necessário acrescentar um backend próprio
 (por exemplo, uma função serverless que chame a API da Anthropic com uma
 chave protegida) e adaptar `analyzeText()` e `answerLocally()` em
-`js/app.js` para chamar esse backend em vez da lógica local.
+`js/app.js` (ou substituir `AtaExtractor.extract()`) para chamar esse backend em vez da lógica local.
 
 ## Publicando no GitHub Pages
 
 1. Crie um repositório novo no GitHub (pode ser público ou privado, mas
    o GitHub Pages gratuito exige repositório público, a menos que você
    tenha GitHub Pro/Team/Enterprise).
-2. Envie estes três arquivos (`index.html`, a pasta `css/` e a pasta
-   `js/`) para a raiz do repositório:
+2. Envie estes arquivos (`index.html`, a pasta `css/` e a pasta
+   `js/`; a pasta `tests/` é opcional) para a raiz do repositório:
    ```bash
    git init
    git add .
@@ -73,9 +89,8 @@ normalmente em qualquer página hospedada no GitHub Pages.
 
 ## Abas do sistema
 
-- **Arquivo**: upload de PDFs/TXTs e índice de todas as atas processadas
-  (buscável, filtrável por status e ordenável clicando no cabeçalho da
-  coluna).
+- **Arquivo**: "Enviar atas" (esquerda) e "Índice de atas" (direita), lado a lado — o índice é
+  buscável por ficheiro e ordenável clicando no cabeçalho da coluna.
 - **Painel**: frequência dos temas, evolução dos temas no tempo, decisões
   por período, quantidade de encaminhamentos por ata, assuntos mais
   recorrentes, rede de relacionamento entre temas e linha do tempo das

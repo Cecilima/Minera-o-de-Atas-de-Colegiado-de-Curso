@@ -18,7 +18,7 @@ const ICONS = {
 ============================================================ */
 const state = {
   atas:[], chatHistory:[], activeView:'arquivo',
-  statusFilter:'all', sortKey:'uploadedAt', sortDir:'desc'
+  sortKey:'uploadedAt', sortDir:'desc'
 };
 
 /* ============================================================
@@ -37,24 +37,14 @@ function saveAtasToStorage(){
 }
 
 const QUESTION_SUGGESTIONS = [
-  "Quais decisões ainda não têm responsável definido?",
+  "Quais encaminhamentos não têm responsável definido?",
   "Resuma os principais assuntos discutidos até agora",
   "Quais prazos vencem em breve?",
   "Quais problemas foram relatados com mais frequência?"
 ];
 
-const STOPWORDS = new Set(("de da do das dos em no na nos nas um uma uns umas e ou a o as os que se para por com sem sobre "+
- "quais qual quando onde quem como foi foram é são ser está estão tem têm ainda mais menos entre até desde já não sim seu sua seus suas "+
- "este esta esse essa aquele aquela isso isto aos às pelo pela pelos pelas nosso наша nossos nossas qualquer "+
- "ata atas reunião ordinária extraordinária colegiado curso bacharelado licenciatura alunos aluno aluna alunas professor professora prof profa "+
- "presidente presentes presente ausentes ausente justificada aprovação pauta período discente docente universidade silva santos oliveira pereira costa "+
- "aprovado reprovado unanimidade membros membro coordenador coordenadora coordenação departamento centro setor assinado assinada assinatura "+
- "documento processo requerimento pedido solicitação parecer favorável contrário voto votação relato relator relatora assunto assuntos "+
- "decisão decisões encaminhamento encaminhamentos prazo prazos responsável responsáveis data local horário horas abertura encerramento "+
- "lista após palavra todos todas outros outras termo termos "+
- "ausência federal estado unirio geiza jobson massollar atividade atividades disciplina disciplinas abril janeiro fevereiro março maio junho julho agosto setembro outubro novembro dezembro "+
- "ensino pesquisa extensão projeto projetos carga horária semestre letivo matriz curricular dia mês ano pautas informes ordem assinam "+
- "instituto superior campus reitoria resolução portaria lei artigo inciso conforme considerando resolve referentes").split(" "));
+// Lista única de stopwords (definida em js/extractor.js) — evita duas listas divergentes.
+const STOPWORDS = AtaExtractor.STOPWORDS;
 
 /* ============================================================
    BOOTSTRAP
@@ -89,15 +79,6 @@ function bindStaticUI(){
     renderAtaTable();
   });
   document.getElementById('export-btn').addEventListener('click', exportData);
-
-  document.querySelectorAll('#status-filter button').forEach(b=>{
-    b.addEventListener('click', ()=>{
-      document.querySelectorAll('#status-filter button').forEach(x=>x.setAttribute('aria-pressed','false'));
-      b.setAttribute('aria-pressed','true');
-      state.statusFilter = b.dataset.status;
-      renderAtaTable();
-    });
-  });
 
   document.querySelectorAll('table.index-table thead th[data-key]').forEach(th=>{
     th.addEventListener('click', ()=>{
@@ -180,7 +161,7 @@ async function processFile(file){
       filename:file.name, uploadedAt:new Date().toISOString(),
       data:analysis.data||null, reuniao:analysis.reuniao||null,
       textExcerpt:text.slice(0,20000), charCount:text.length,
-      analysis:{assuntos:analysis.assuntos, decisoes:analysis.decisoes, encaminhamentos:analysis.encaminhamentos, problemas:analysis.problemas, termosRecorrentes:analysis.termosRecorrentes},
+      analysis:packAnalysis(analysis),
       status: analysis.degraded ? 'parcial' : 'concluido'
     };
     doc.id = 'local-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
@@ -194,6 +175,13 @@ async function processFile(file){
   }finally{ removePendingRow(pendingId); }
 }
 
+function packAnalysis(an){
+  return {versao:an.versao, assuntos:an.assuntos, assuntosDetalhe:an.assuntosDetalhe,
+    decisoes:an.decisoes, encaminhamentos:an.encaminhamentos, problemas:an.problemas,
+    demandas:an.demandas, sugestoes:an.sugestoes, termosRecorrentes:an.termosRecorrentes,
+    participantes:an.participantes, estrutura:an.estrutura};
+}
+
 async function extractText(file){
   const isPdf = file.type==='application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   if(isPdf) return extractPdfText(file);
@@ -203,7 +191,23 @@ async function extractPdfText(file){
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data:buf}).promise;
   let out=''; const maxPages = Math.min(pdf.numPages, 80);
-  for(let i=1;i<=maxPages;i++){ const page = await pdf.getPage(i); const content = await page.getTextContent(); out += content.items.map(it=>it.str).join(' ') + '\n\n'; }
+  for(let i=1;i<=maxPages;i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    // Reconstrói as LINHAS usando a posição vertical (y) de cada trecho. Sem isso, títulos,
+    // itens numerados e tabelas se perdem — e a detecção de estrutura fica impossível.
+    // Lacunas horizontais grandes viram TAB (colunas de tabela).
+    let line='', lastY=null, lastEnd=null;
+    content.items.forEach(it=>{
+      if(!it.str && !it.hasEOL) return;
+      const y = it.transform[5], x = it.transform[4], h = it.height || 10;
+      if(lastY!==null && Math.abs(y-lastY) > h*0.6){ out += line.trimEnd()+'\n'; line=''; lastEnd=null; }
+      if(lastEnd!==null && line){ const gap = x-lastEnd; line += gap > h*3 ? '\t' : (/\s$/.test(line)||/^\s/.test(it.str) ? '' : ' '); }
+      line += it.str;
+      lastY = y; lastEnd = x + (it.width||0);
+    });
+    out += line.trimEnd()+'\n\n';
+  }
   return out;
 }
 
@@ -211,142 +215,8 @@ async function extractPdfText(file){
    ANÁLISE
 ============================================================ */
 async function analyzeText(text, filename){
-  return heuristicExtract(text, filename);
-}
-
-const MESES = {janeiro:'01',fevereiro:'02','março':'03',marco:'03',abril:'04',maio:'05',junho:'06',julho:'07',agosto:'08',setembro:'09',outubro:'10',novembro:'11',dezembro:'12'};
-const ABREV_RE = /\b(Prof|Profa|Prof[ªa]|Sr|Sra|Dr|Dra|Art|nº|n°|Exmo|Exma|etc|Av|Rua)\./gi;
-
-function findMeetingDate(text){
-  const m1 = text.match(/\b(\d{1,2})\s*(?:de)?\s*([a-zç]+)\s+de\s+(\d{4})\b/i);
-  const m2 = text.match(/\b(\d{2})[\/\-](\d{2})[\/\-](\d{4})\b/);
-  if(m1 && MESES[m1[2].toLowerCase()]) return m1[3]+'-'+MESES[m1[2].toLowerCase()]+'-'+String(m1[1]).padStart(2,'0');
-  if(m2) return m2[3]+'-'+m2[2]+'-'+m2[1];
-  return null;
-}
-
-function findReuniao(text){
-  const mTitle = text.match(/\d+ª?\s*Reuni[ãa]o\s+(?:Ordin[áa]ria|Extraordin[áa]ria)(?:\s+\d{4}(?:\.\d+)?)?/i);
-  const mCurso = text.match(/Colegiado do Curso de[^\n]*?(?=\s+\d{1,2}\s+de\s+[a-zçãéíóú]+\s+de\s+\d{4}\b)/i) ||
-                 text.match(/Colegiado do Curso de[^.\n]{0,80}/i);
-  if(mTitle && mCurso) return (mTitle[0].trim()+' — '+mCurso[0].trim()).replace(/\s+/g,' ');
-  if(mTitle) return mTitle[0].trim();
-  if(mCurso) return mCurso[0].trim().replace(/\s+/g,' ');
-  const alt = text.match(/Ata\s+d[ao]\s+[^.\n]{0,80}/i);
-  return alt ? alt[0].trim().replace(/\s+/g,' ') : null;
-}
-
-function splitSentences(text){
-  const protectedText = text.replace(ABREV_RE, m => m.slice(0,-1)+'§');
-  const raw = protectedText.split(/(?<=[.!?])\s+(?=[A-ZÀ-Ú0-9"“(])/);
-  return raw.map(s => s.replace(/§/g,'.').trim()).filter(Boolean);
-}
-
-/* ============================================================
-   NOME / RESPONSÁVEL  (REESCRITO)
-============================================================
-   Antes, os regex tinham a flag /i junto com [A-ZÀ-Ú] — o /i
-   neutralizava a exigência de maiúscula e o padrão "engolia"
-   as palavras seguintes (verbos, conjunções, etc.), produzindo
-   nomes do tipo "Felipe concordaram e".
-
-   Agora:
-   • O gatilho ("responsável", "sob responsabilidade", "Prof."…)
-     é escrito à mão com classes [Rr], [Ss], [Pp]… — insensível
-     a maiúsculas só no gatilho.
-   • O NOME só aceita palavras com inicial MAIÚSCULA (sem /i),
-     permitindo partículas minúsculas legítimas no meio
-     (de, da, do, das, dos).
-   • cleanName() remove caudas que claramente não são nome.
-============================================================ */
-
-// Bloco reutilizável: "Palavra" seguida de 0–4 palavras (partículas ou outra Palavra).
-// Sem /i, então [A-ZÀ-Ú] realmente exige maiúscula.
-const NAME_PATTERN =
-  "[A-ZÀ-Ú][\\wà-úÀ-Ú.'-]*(?:\\s+(?:d[aeo]s?|[A-ZÀ-Ú][\\wà-úÀ-Ú.'-]*)){0,4}";
-
-const RESP_EXPLICIT_PATTERNS = [
-  new RegExp("[Rr]espons[áa]vel\\s*(?:pel[ao])?\\s*:?\\s*(" + NAME_PATTERN + ")"),
-  new RegExp("[Ss]ob\\s+responsabilidade\\s+d[eo]\\s+(" + NAME_PATTERN + ")"),
-  new RegExp("[Aa]\\s+cargo\\s+d[eo]\\s+(" + NAME_PATTERN + ")"),
-  new RegExp("[Cc]oordenad[oa]\\s+por\\s+(" + NAME_PATTERN + ")")
-];
-
-const TITLE_NAME_PATTERN = new RegExp(
-  "\\b(?:[Pp]rof(?:essor[a]?)?[ªa°]?\\.?|[Cc]oordenador[a]?\\.?|[Dd]iretor[a]?\\.?)\\s+(" +
-  NAME_PATTERN + ")"
-);
-
-// Caudas que nunca fazem parte de um nome humano — usadas para limpar
-// sobras defensivamente caso algum PDF estranho quebre as regras.
-const NAME_TAIL_STOP = /^(?:e|ou|que|como|para|por|com|sem|sobre|de|da|do|das|dos|em|no|na|nos|nas|ao|aos|à|às|é|são|foi|foram|será|serão|est[áã]|est[ãa]o|inform(ou|aram)|relat(ou|aram)|explic(ou|aram)|concord(ou|aram)|apresent(ou|aram)|solicit(ou|aram)|prop[ôo]s|suger(iu|iram)|decid(iu|iram)|aprov(ou|aram)|encaminh(ou|aram))$/i;
-
-function findResponsavel(sentence){
-  for(const re of RESP_EXPLICIT_PATTERNS){
-    const m = sentence.match(re);
-    if(m) return cleanName(m[1]);
-  }
-  const mTitle = sentence.match(TITLE_NAME_PATTERN);
-  if (mTitle) return cleanName(mTitle[1]);
-  return null;
-}
-
-function cleanName(n){
-  if(!n) return null;
-  let name = n.trim().replace(/[.,;:]+$/,'');
-  // Defensivo: corta palavras finais que claramente não são nome.
-  const parts = name.split(/\s+/);
-  while(parts.length > 1 && NAME_TAIL_STOP.test(parts[parts.length-1])) parts.pop();
-  name = parts.join(' ').replace(/[.,;:]+$/,'').trim();
-  return name || null;
-}
-
-function findPrazo(sentence){
-  const m1 = sentence.match(/prazo\s*(?:de|final|:)?\s*(?:at[ée]\s*)?(\d{2}[\/\-]\d{2}[\/\-]\d{2,4})/i);
-  if(m1) return m1[1];
-  const m2 = sentence.match(/at[ée]\s+(?:o\s+dia\s+)?(\d{1,2}\s*(?:de)?\s*[a-zç]+(?:\s+de\s+\d{4})?)/i);
-  if(m2) return m2[1].trim();
-  const m3 = sentence.match(/\b(\d{2}[\/\-]\d{2}[\/\-]\d{2,4})\b/);
-  if(m3 && /prazo|at[ée]/i.test(sentence)) return m3[1];
-  return null;
-}
-
-const DECISION_VERB_RE = /\b(aprovad[oa]s?|reprovad[oa]s?|deferid[oa]s?|indeferid[oa]s?|decidiu-se|aprovou-se|deliberou-se|homologad[oa]s?)\b/i;
-
-function heuristicExtract(text, filename){
-  const lower = text.toLowerCase();
-  const data = findMeetingDate(text);
-  const reuniao = findReuniao(text);
-
-  const sentences = splitSentences(text.replace(/\n+/g, ' '));
-  const decisoes=[], encaminhamentos=[], problemas=[];
-  sentences.forEach(s=>{
-    if(s.length<8 || s.length>700) return;
-    const ll = s.toLowerCase();
-    const responsavel = findResponsavel(s);
-    const prazo = findPrazo(s);
-
-    if(DECISION_VERB_RE.test(s)) {
-      decisoes.push({descricao:s, responsavel, prazo});
-    } else if(/\b(encaminh|providenciar|solicitad[oa]|solicitou)\b/i.test(ll)) {
-      encaminhamentos.push({descricao:s, responsavel, prazo});
-    } else if(/problema|dificuldade|pend[êe]ncia|demanda|preocupa[çc][ãa]o/.test(ll)) {
-      problemas.push(s);
-    }
-  });
-
-  const freq={};
-  lower.replace(/[^a-zà-ú\s]/g,' ').split(/\s+/).forEach(w=>{ if(w.length>4 && !STOPWORDS.has(w)) freq[w]=(freq[w]||0)+1; });
-  const termosRecorrentes = Object.entries(freq).sort((a,b)=>b[1]-a[1]).slice(0,15).map(([termo,contagem])=>({termo,contagem}));
-
-  const decisoesOut = decisoes.slice(0,30), encaminhamentosOut = encaminhamentos.slice(0,30);
-  const degraded = (decisoesOut.length + encaminhamentosOut.length) === 0;
-
-  return {
-    reuniao, data, assuntos:termosRecorrentes.slice(0,8).map(t=>t.termo),
-    decisoes:decisoesOut, encaminhamentos:encaminhamentosOut, problemas:problemas.slice(0,15),
-    termosRecorrentes, degraded
-  };
+  // Toda a lógica de extração vive em js/extractor.js (testável fora do navegador).
+  return AtaExtractor.extract(text, {filename});
 }
 
 /* ============================================================
@@ -355,7 +225,7 @@ function heuristicExtract(text, filename){
 function renderBanners(){
   const el = document.getElementById('banners');
   if(!state.atas.length){
-    el.innerHTML = '<div class="banner">'+ICONS.info+'<div><strong>Como funciona:</strong> a extração de assuntos, decisões, encaminhamentos, responsáveis e prazos é feita localmente no navegador, por palavras-chave — os ficheiros não são enviados para nenhum servidor. Revise sempre os resultados na tela de detalhe.</div></div>';
+    el.innerHTML = '<div class="banner">'+ICONS.info+'<div><strong>Como funciona:</strong> a extração de assuntos, decisões, encaminhamentos, responsáveis e prazos é feita localmente no navegador, por estrutura do texto e padrões linguísticos (sem IA externa) — os ficheiros não são enviados para nenhum servidor. Cada item mostra um nível de confiança; revise sempre os resultados na tela de detalhe.</div></div>';
   }else{
     el.innerHTML = '';
   }
@@ -386,7 +256,7 @@ function renderHero(){
   list.innerHTML = [
     ['n', state.atas.length, 'atas no arquivo'],
     ['n', decisions, 'decisões registadas'],
-    ['n', encs, 'encaminhamentos em aberto']
+    ['n', encs, 'encaminhamentos registados']
   ].map(([,n,l])=>'<div class="now-row"><span class="n">'+n+'</span><span class="l">'+l+'</span></div>').join('');
 }
 
@@ -403,7 +273,6 @@ function removePendingRow(id){ document.getElementById(id)?.remove(); renderHero
 function sortedFilteredAtas(){
   const q = (document.getElementById('search-input').value||'').toLowerCase().trim();
   let items = state.atas.filter(a=>{
-    if(state.statusFilter!=='all' && (a.status||'concluido')!==state.statusFilter) return false;
     if(!q) return true;
     const hay = [a.filename, a.reuniao, (a.analysis?.assuntos||[]).join(' ')].join(' ').toLowerCase();
     return hay.includes(q);
@@ -441,7 +310,7 @@ function renderAtaTable(){
   if(!items.length){
     tbody.innerHTML = '<tr><td colspan="7"><div class="empty-state">'+ICONS.archive.replace('viewBox="0 0 24 24" width="26" height="26"','viewBox="0 0 24 24" width="24" height="24"')+
       '<div class="t">'+(state.atas.length ? 'Nenhuma ata corresponde ao filtro' : 'Arquivo vazio')+'</div>'+
-      '<div class="d">'+(state.atas.length ? 'Ajuste a busca ou o filtro de status.' : 'Envie um PDF ou TXT acima para começar.')+'</div></div></td></tr>';
+      '<div class="d">'+(state.atas.length ? 'Ajuste a busca.' : 'Envie um PDF ou TXT acima para começar.')+'</div></div></td></tr>';
     return;
   }
 
@@ -484,50 +353,115 @@ function deleteAta(a){
 /* ============================================================
    DRAWER
 ============================================================ */
+const TIPO_PRAZO = {data:'data', periodo:'período', evento:'evento', reuniao:'reunião', indefinido:'sem data definida'};
+const descOf = x => (typeof x==='string' ? x : (x && x.descricao) || '');
+function respList(item){
+  if(item.responsaveis && item.responsaveis.length) return item.responsaveis;
+  return item.responsavel ? [{nome:item.responsavel, cargo:item.cargo||null}] : [];
+}
+function respLabel(item){ return respList(item).map(r=>r.nome+(r.cargo?' ('+r.cargo+')':'')).join(' e '); }
+function confChip(x){
+  if(x.confianca==null) return '';
+  const lv = AtaExtractor.level(x.confianca);
+  return '<span class="conf conf-'+(lv==='média'?'media':lv)+'" title="Confiança da extração: '+Math.round(x.confianca*100)+'%">confiança '+lv+'</span>';
+}
+function prazoLabel(x){
+  if(!x.prazo) return '';
+  let t = 'prazo / referência: '+escapeHtml(x.prazo)+(x.prazoTipo && TIPO_PRAZO[x.prazoTipo] ? ' ['+TIPO_PRAZO[x.prazoTipo]+']' : '');
+  if(x.prazoData && x.prazoData!==x.prazo && !x.prazo.includes(x.prazoData)) t += ' · data associada: '+escapeHtml(x.prazoData);
+  return '<span>'+t+'</span>';
+}
+function itemCard(x, chipClass, chipLabel){
+  const resp = respLabel(x);
+  return '<div class="item-card"><span class="chip '+chipClass+'">'+chipLabel+'</span>'+confChip(x)+
+    (x.decidido?'<span class="conf" title="A frase registra uma decisão que atribui uma ação">decidido</span>':'')+
+    '<div class="desc" style="margin-top:7px;">'+escapeHtml(descOf(x))+'</div>'+
+    (x.acao?'<div class="acao"><b>Ação:</b> '+escapeHtml(x.acao)+'</div>':'')+
+    '<div class="tags">'+
+      (resp?'<span>responsável: '+escapeHtml(resp)+'</span>':'')+prazoLabel(x)+
+      (x.proponente?'<span>proposto por: '+escapeHtml(x.proponente)+'</span>':'')+
+      (x.assunto?'<span>assunto: '+escapeHtml(x.assunto)+'</span>':'')+
+    '</div>'+
+    (x.contexto?'<div class="ctx">Inclui a frase anterior, necessária para entender a decisão.</div>':'')+
+    (x.gatilho?'<div class="ctx">detectado por: «'+escapeHtml(x.gatilho)+'»</div>':'')+
+  '</div>';
+}
+
+function reanalyzeAta(id){
+  const a = state.atas.find(x=>x.id===id);
+  if(!a) return;
+  const an = AtaExtractor.extract(a.textExcerpt||'', {filename:a.filename});
+  a.analysis = packAnalysis(an);
+  a.data = an.data || a.data; a.reuniao = an.reuniao || a.reuniao;
+  a.status = an.degraded ? 'parcial' : 'concluido';
+  saveAtasToStorage(); renderAll(); openDrawer(a);
+  toast('Ata reanalisada.');
+}
+
 function openDrawer(a){
   const d = document.getElementById('drawer');
   const an = a.analysis || {};
   const listOrEmpty = (arr, render) => arr && arr.length ? arr.map(render).join('') : '<p class="muted">Nada identificado.</p>';
+  const isLegacy = !an.versao;
+  const canReanalyze = isLegacy && a.textExcerpt && a.textExcerpt.length >= (a.charCount||0);
 
-  const responsaveisSet = new Set();
-  const prazosSet = new Set();
-  (an.decisoes||[]).forEach(item => { if(item.responsavel) responsaveisSet.add(item.responsavel); if(item.prazo) prazosSet.add(item.prazo); });
-  (an.encaminhamentos||[]).forEach(item => { if(item.responsavel) responsaveisSet.add(item.responsavel); if(item.prazo) prazosSet.add(item.prazo); });
-  const respList = Array.from(responsaveisSet);
-  const prazoList = Array.from(prazosSet);
+  const respMap = new Map();
+  const prazos = [];
+  [...(an.decisoes||[]), ...(an.encaminhamentos||[])].forEach(item=>{
+    respList(item).forEach(r=>{ if(!respMap.has(r.nome)) respMap.set(r.nome, r.cargo); });
+    if(item.prazo) prazos.push(item);
+  });
 
+  const subj = an.assuntosDetalhe || [];
+  let subjHtml;
+  if(subj.length){
+    subjHtml = '<ul class="subj-list">'+subj.map(x=>'<li><span>'+escapeHtml(x.titulo)+'</span>'+
+      '<span class="why">'+escapeHtml(x.origem||'')+' · confiança '+x.nivel+'</span>'+
+      (x.procedural?'<span class="proc">procedimental</span>':'')+'</li>').join('')+'</ul>';
+  }else if(an.assuntos && an.assuntos.length){
+    subjHtml = '<div class="tag-list">'+an.assuntos.map(t=>'<span class="tag">'+escapeHtml(t)+'</span>').join('')+'</div>';
+  }else{
+    subjHtml = '<p class="muted">Não identificado com segurança. A ata não traz pauta, títulos ou frases introdutórias reconhecíveis, e o sistema não inventa assuntos a partir de palavras frequentes.</p>';
+  }
+
+  const termos = an.termosRecorrentes||[];
   d.innerHTML =
     '<div class="drawer-head">'+
       '<button class="icon-btn drawer-close" id="drawer-close">'+ICONS.close+'</button>'+
       '<div class="dh-kicker">DETALHE DA ATA</div>'+
       '<h3>'+escapeHtml(a.reuniao || a.filename)+'</h3>'+
-      '<div class="dh-meta">'+escapeHtml(a.filename)+' · '+(a.data ? fmtDate(a.data) : 'data não identificada')+' · enviada a '+fmtDateTime(a.uploadedAt)+'</div>'+
+      '<div class="dh-meta">'+escapeHtml(a.filename)+' · '+(a.data ? fmtDate(a.data) : 'data não identificada')+' · enviada a '+fmtDateTime(a.uploadedAt)+
+        (an.estrutura ? ' · estrutura: '+escapeHtml(an.estrutura.tipo) : '')+'</div>'+
     '</div>'+
     '<div class="drawer-body">'+
-      '<h5>Assuntos</h5><div class="tag-list">'+
-        (an.assuntos&&an.assuntos.length ? an.assuntos.map(s=>'<span class="tag">'+escapeHtml(s)+'</span>').join('') : '<p class="muted">Nada identificado.</p>')+
+      (isLegacy ? '<div class="drawer-note">Esta ata foi analisada por uma versão anterior do extrator (assuntos baseados em palavras frequentes). '+
+        (canReanalyze ? 'Clique para reanalisar com a lógica atual.<br><button class="btn" id="reanalyze-btn">Reanalisar esta ata</button>' : 'Reenvie o ficheiro para obter a análise atual.')+'</div>' : '')+
+      '<h5>Assuntos</h5>'+subjHtml+
+      '<h5>Responsáveis citados</h5><div class="tag-list">'+
+        (respMap.size ? Array.from(respMap).map(([n,c])=>'<span class="tag" style="background:var(--teal-soft);color:var(--teal-deep);">'+escapeHtml(n)+(c?' · '+escapeHtml(c):'')+'</span>').join('') : '<p class="muted">Nenhum responsável identificado.</p>')+
       '</div>'+
-      '<h5>Responsáveis Citados</h5><div class="tag-list">'+
-        (respList.length ? respList.map(r=>'<span class="tag" style="background:var(--teal-soft);color:var(--teal-deep);">'+escapeHtml(r)+'</span>').join('') : '<p class="muted">Nenhum responsável explícito identificado.</p>')+
-      '</div>'+
-      '<h5>Prazos Definidos</h5><div class="tag-list">'+
-        (prazoList.length ? prazoList.map(p=>'<span class="tag" style="background:var(--amber-soft);color:var(--amber-deep);">'+escapeHtml(p)+'</span>').join('') : '<p class="muted">Nenhum prazo identificado.</p>')+
+      '<h5>Prazos e referências temporais</h5><div class="tag-list">'+
+        (prazos.length ? prazos.map(p=>'<span class="tag" style="background:var(--amber-soft);color:var(--amber-deep);">'+escapeHtml(p.prazo)+(p.prazoData && !p.prazo.includes(p.prazoData)?' → '+escapeHtml(p.prazoData):'')+'</span>').join('') : '<p class="muted">Nenhum prazo ou referência temporal identificado.</p>')+
       '</div>'+
       '<h5>Decisões ('+(an.decisoes?an.decisoes.length:0)+')</h5>'+
-      listOrEmpty(an.decisoes, dcs=>'<div class="item-card"><span class="chip dec">DECISÃO</span><div class="desc" style="margin-top:7px;">'+escapeHtml(dcs.descricao)+'</div><div class="tags">'+
-        (dcs.responsavel?'<span>responsável: '+escapeHtml(dcs.responsavel)+'</span>':'')+(dcs.prazo?'<span>prazo: '+escapeHtml(dcs.prazo)+'</span>':'')+'</div></div>')+
+      listOrEmpty(an.decisoes, x=>itemCard(x,'dec','DECISÃO'))+
       '<h5>Encaminhamentos ('+(an.encaminhamentos?an.encaminhamentos.length:0)+')</h5>'+
-      listOrEmpty(an.encaminhamentos, dcs=>'<div class="item-card"><span class="chip enc">ENCAM.</span><div class="desc" style="margin-top:7px;">'+escapeHtml(dcs.descricao)+'</div><div class="tags">'+
-        (dcs.responsavel?'<span>responsável: '+escapeHtml(dcs.responsavel)+'</span>':'')+(dcs.prazo?'<span>prazo: '+escapeHtml(dcs.prazo)+'</span>':'')+'</div></div>')+
-      '<h5>Problemas / demandas</h5>'+
-      (an.problemas&&an.problemas.length ? '<ul>'+an.problemas.map(p=>'<li>'+escapeHtml(p)+'</li>').join('')+'</ul>' : '<p class="muted">Nada identificado.</p>')+
+      listOrEmpty(an.encaminhamentos, x=>itemCard(x,'enc','ENCAM.'))+
+      '<h5>Problemas ('+(an.problemas?an.problemas.length:0)+')</h5>'+
+      listOrEmpty(an.problemas, x=>itemCard(typeof x==='string'?{descricao:x}:x,'prob','PROBLEMA'))+
+      '<h5>Demandas ('+(an.demandas?an.demandas.length:0)+')</h5>'+
+      listOrEmpty(an.demandas, x=>itemCard(x,'dem','DEMANDA'))+
+      '<h5>Sugestões e propostas — não deliberadas ('+(an.sugestoes?an.sugestoes.length:0)+')</h5>'+
+      listOrEmpty(an.sugestoes, x=>itemCard(x,'sug',x.tipo==='proposta'?'PROPOSTA':'SUGESTÃO'))+
       '<h5>Termos recorrentes</h5><div class="tag-list">'+
-        (an.termosRecorrentes&&an.termosRecorrentes.length ? an.termosRecorrentes.map(t=>'<span class="tag">'+escapeHtml(t.termo)+' · '+t.contagem+'</span>').join('') : '<p class="muted">Nada identificado.</p>')+
+        (termos.length ? termos.map(t=>'<span class="tag">'+escapeHtml(t.termo)+' · '+t.contagem+'</span>').join('') : '<p class="muted">Nada identificado.</p>')+
       '</div>'+
       '<h5>Texto extraído</h5><details><summary>Mostrar texto</summary><div class="raw-text" style="margin-top:10px;">'+escapeHtml((a.textExcerpt||'').slice(0,20000))+'</div></details>'+
     '</div>';
 
   document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+  const rb = document.getElementById('reanalyze-btn');
+  if(rb) rb.addEventListener('click', ()=>reanalyzeAta(a.id));
   document.getElementById('drawer-backdrop').classList.add('open');
   document.getElementById('drawer').classList.add('open');
 }
@@ -540,11 +474,16 @@ function buildResponsaveis(atas){
   const map = {};
   atas.forEach(a=>{
     const an = a.analysis||{};
+    const seen = new Set();   // uma decisão que atribui ação aparece nas duas listas: conta só uma vez por pessoa
     const addItem = (item, tipo) => {
-      if(!item.responsavel) return;
-      const key = item.responsavel.trim().toLowerCase();
-      if(!map[key]) map[key] = {nome:item.responsavel.trim(), decisoes:[], encaminhamentos:[]};
-      map[key][tipo].push(Object.assign({ata:a.filename, data:a.data, reuniao:a.reuniao}, item));
+      respList(item).forEach(r=>{
+        const nome = (r.nome||'').trim(); if(!nome) return;
+        const key = nome.toLowerCase();
+        const dk = key+'|'+descOf(item).slice(0,100);
+        if(seen.has(dk)) return; seen.add(dk);
+        if(!map[key]) map[key] = {nome, decisoes:[], encaminhamentos:[]};
+        map[key][tipo].push(Object.assign({ata:a.filename, data:a.data, reuniao:a.reuniao}, item));
+      });
     };
     (an.decisoes||[]).forEach(d=>addItem(d,'decisoes'));
     (an.encaminhamentos||[]).forEach(d=>addItem(d,'encaminhamentos'));
@@ -581,7 +520,7 @@ function renderResponsaveis(){
         '<div class="resp-stat"><span class="n">'+r.decisoes.length+'</span><span class="l">DECISÕES</span></div>'+
         '<div class="resp-stat"><span class="n">'+r.encaminhamentos.length+'</span><span class="l">ENCAM.</span></div>'+
       '</div>'+
-      (pendentes>0 ? '<div class="resp-pending">'+pendentes+' item(ns) sem prazo definido</div>' : '<div class="resp-ok">todos os itens com prazo</div>')+
+      (pendentes>0 ? '<div class="resp-pending">'+pendentes+' item(ns) sem prazo ou referência temporal</div>' : '<div class="resp-ok">todos os itens com prazo</div>')+
     '</div>';
   }).join('')+'</div>';
 
@@ -594,7 +533,7 @@ function openRespDrawer(r){
   const d = document.getElementById('drawer');
   const renderItems = (items, chipClass, chipLabel) => items.length ? items.map(it=>
     '<div class="item-card"><span class="chip '+chipClass+'">'+chipLabel+'</span><div class="desc" style="margin-top:7px;">'+escapeHtml(it.descricao)+'</div>'+
-    '<div class="tags"><span>'+escapeHtml(it.ata)+(it.data?' · '+fmtDate(it.data):'')+'</span>'+(it.prazo?'<span>prazo: '+escapeHtml(it.prazo)+'</span>':'<span>sem prazo</span>')+'</div></div>'
+    (it.acao?'<div class="acao"><b>Ação:</b> '+escapeHtml(it.acao)+'</div>':'')+'<div class="tags"><span>'+escapeHtml(it.ata)+(it.data?' · '+fmtDate(it.data):'')+'</span>'+(it.prazo?prazoLabel(it):'<span>sem prazo</span>')+'</div></div>'
   ).join('') : '<p class="muted">Nenhum item.</p>';
 
   d.innerHTML =
@@ -636,7 +575,7 @@ function monthLabel(key){ const [y,m]=key.split('-'); const d=new Date(Date.UTC(
 
 function themeFrequency(atas){
   const map = {};
-  atas.forEach(a=> (a.analysis?.assuntos||[]).forEach(t=>{ const k=t.trim().toLowerCase(); if(!k) return; map[k]=map[k]||{label:t.trim(),count:0}; map[k].count++; }));
+  atas.forEach(a=> (a.analysis?.assuntos||[]).forEach(t=>{ const k=t.trim().toLowerCase(); if(!k || AtaExtractor.isProceduralSubject(t)) return; map[k]=map[k]||{label:t.trim(),count:0}; map[k].count++; }));
   return Object.values(map).sort((a,b)=>b.count-a.count);
 }
 function decisionsByPeriod(atas){
@@ -663,7 +602,7 @@ function buildNetwork(atas, maxNodes){
 function allDecisionsTimeline(atas){
   const rows = [];
   atas.forEach(a=> (a.analysis?.decisoes||[]).forEach(d=> rows.push({date:a.data, descricao:d.descricao, responsavel:d.responsavel, prazo:d.prazo, ata:a.filename, reuniao:a.reuniao})));
-  rows.sort((a,b)=> (a.date||'9999')<(b.date||'9999') ? -1 : 1);
+  rows.sort((a,b)=>{ const x=a.date||'9999', y=b.date||'9999'; return x<y?-1:(x>y?1:0); });
   return rows;
 }
 
@@ -696,7 +635,6 @@ function renderKpiRow(){
    RENDER BARRA LARANJA (cor padrão do painel)
 ============================================================ */
 const BAR_ORANGE = '#E1A03C';        // laranja principal (--amber)
-const BAR_ORANGE_DEEP = '#B97A22';   // laranja escuro (--amber-deep) — alternativa
 
 function renderHtmlBarChart(containerId, dataArray, colorHex = BAR_ORANGE) {
     const el = document.getElementById(containerId);
@@ -803,73 +741,92 @@ function renderNetwork(){
 /* ============================================================
    CONSULTA / CHAT INTELIGENTE
 ============================================================ */
-function answerLocally(question){
-  const qLower = question.toLowerCase();
-
-  if (qLower.includes("resum") || qLower.includes("principais assuntos")) {
-    const freq = themeFrequency(state.atas).slice(0, 5);
-    if(freq.length) return "Os assuntos mais recorrentes discutidos nas atas são:\n\n" + freq.map(f => `• ${f.label} (${f.count} menções)`).join('\n');
-    return "Ainda não há dados suficientes para gerar um resumo.";
-  }
-
-  if (qLower.includes("não têm responsável") || qLower.includes("sem responsável")) {
-    let res = [];
-    state.atas.forEach(a => {
-        const an = a.analysis || {};
-        [...(an.decisoes||[]), ...(an.encaminhamentos||[])].forEach(item => {
-            if (!item.responsavel) res.push(`• [${a.filename}] ${item.descricao}`);
-        });
-    });
-    if (res.length) return "Aqui estão as decisões e encaminhamentos ainda sem responsável definido:\n\n" + res.slice(0, 10).join('\n\n') + (res.length > 10 ? '\n\n(Exibindo os 10 primeiros)' : '');
-    return "Excelente! Todos os itens identificados possuem um responsável.";
-  }
-
-  if (qLower.includes("prazo") || qLower.includes("vence")) {
-    let res = [];
-    state.atas.forEach(a => {
-        const an = a.analysis || {};
-        [...(an.decisoes||[]), ...(an.encaminhamentos||[])].forEach(item => {
-            if (item.prazo) res.push(`• [${a.filename}] ${item.descricao}\n  Prazo: ${item.prazo}` + (item.responsavel ? ` (Resp: ${item.responsavel})` : ''));
-        });
-    });
-    if(res.length) return "Encontrei os seguintes itens com prazos definidos nas atas:\n\n" + res.slice(0, 8).join('\n\n');
-    return "Não encontrei prazos definidos nas atas enviadas.";
-  }
-
-  if (qLower.includes("problema") || qLower.includes("frequência")) {
-    let res = [];
-    state.atas.forEach(a => {
-        (a.analysis?.problemas||[]).forEach(p => res.push(`• [${a.filename}] ${p}`));
-    });
-    if(res.length) return "Estes foram os problemas ou demandas relatados:\n\n" + res.slice(0, 8).join('\n\n');
-    return "Não identifiquei problemas ou demandas explícitas nas atas.";
-  }
-
-  const qWords = new Set((qLower.match(/[a-zà-ú0-9]+/g)||[]).filter(w=>w.length>2 && !STOPWORDS.has(w)));
-  if(!qWords.size) return 'Tente reformular a pergunta com palavras mais específicas (ex: "prazo", "assunto", "resumo").';
-
-  const hits = [];
+function allItems(){
+  const rows = [];
   state.atas.forEach(a=>{
     const an = a.analysis||{};
-    const consider = (list, tipo) => (list||[]).forEach(item=>{
-      const desc = item.descricao||item;
-      let score=0; qWords.forEach(w=>{ if(String(desc).toLowerCase().includes(w)) score++; });
-      if(score>0) hits.push({a, tipo, item, score});
+    const add = (list, tipo) => (list||[]).forEach(item=>{
+      const it = typeof item==='string' ? {descricao:item} : item;
+      rows.push({a, tipo, item:it});
     });
-    consider(an.decisoes, 'decisão');
-    consider(an.encaminhamentos, 'encaminhamento');
-    consider(an.problemas, 'problema');
+    add(an.decisoes,'decisão'); add(an.encaminhamentos,'encaminhamento'); add(an.problemas,'problema');
+    add(an.demandas,'demanda'); add(an.sugestoes,'sugestão');
+  });
+  return rows;
+}
+function fmtRow(r, extra){
+  const it = r.item;
+  const resp = respLabel(it);
+  return '• ['+r.a.filename+'] '+descOf(it)+(extra||'')+(resp?'\n  Responsável: '+resp:'');
+}
+const norm = s => AtaExtractor.fold(s||'');
+const cut = (arr, n) => arr.slice(0,n).join('\n\n') + (arr.length>n ? '\n\n(Exibindo '+n+' de '+arr.length+')' : '');
+
+function answerLocally(question){
+  const q = norm(question);
+  const rows = allItems();
+  const acoes = rows.filter(r=>r.tipo==='decisão' || r.tipo==='encaminhamento');
+
+  // ordem importa: "sem prazo" e "sem responsável" antes de "prazo"/"responsável"
+  if (/(?:nao\s+tem|nao\s+tem|sem|ainda\s+nao\s+tem)\s+(?:um\s+)?prazo|sem\s+prazo|nao\s+definid\w*\s+prazo/.test(q)) {
+    const res = acoes.filter(r=>r.tipo==='encaminhamento' || /decis/.test(q)).filter(r=>!r.item.prazo);
+    return res.length ? 'Itens sem prazo nem referência temporal identificados:\n\n'+cut(res.map(r=>fmtRow(r)),10)
+                      : 'Todos os encaminhamentos identificados possuem algum prazo ou referência temporal.';
+  }
+  if (/(?:nao\s+tem|sem)\s+responsavel|sem\s+responsavel|nao\s+(?:tem|possui)\s+(?:um\s+)?responsavel/.test(q)) {
+    const res = acoes.filter(r=>(/decis/.test(q) ? true : r.tipo==='encaminhamento') && respList(r.item).length===0);
+    return res.length ? 'Itens sem responsável identificado:\n\n'+cut(res.map(r=>fmtRow(r)),10)
+                      : 'Todos os itens consultados têm responsável identificado.';
+  }
+  if (/prazo|vence|vencem|quando|data\s+limite|ate\s+quando/.test(q)) {
+    const today = new Date().toISOString().slice(0,10);
+    const withP = acoes.filter(r=>r.item.prazo);
+    if(!withP.length) return 'Não encontrei prazos ou referências temporais nas atas enviadas.';
+    const iso = r => r.item.prazoISO || null;
+    const upcoming = withP.filter(r=>iso(r) && iso(r)>=today).sort((x,y)=>iso(x)<iso(y)?-1:1);
+    const past = withP.filter(r=>iso(r) && iso(r)<today);
+    const relative = withP.filter(r=>!iso(r));
+    const line = r => fmtRow(r, '\n  Prazo/referência: '+r.item.prazo+(r.item.prazoData && !r.item.prazo.includes(r.item.prazoData)?' ('+r.item.prazoData+')':''));
+    let out = '';
+    if(upcoming.length) out += 'Com data a vencer (mais próximos primeiro):\n\n'+cut(upcoming.map(line),6)+'\n\n';
+    if(relative.length) out += 'Com referência relativa (sem data exata):\n\n'+cut(relative.map(line),6)+'\n\n';
+    if(past.length) out += past.length+' item(ns) têm data já passada.';
+    return out.trim();
+  }
+  if (/resum|principais\s+assunto|quais\s+assuntos|assuntos\s+(?:discutid|trat|recorrent)/.test(q)) {
+    const freq = themeFrequency(state.atas).slice(0, 6);
+    if(freq.length) return 'Assuntos mais frequentes nas atas (excluindo itens procedimentais como "Informes"):\n\n' + freq.map(f => `• ${f.label} (${f.count} ata(s))`).join('\n');
+    return 'Ainda não há assuntos identificados com segurança nas atas enviadas.';
+  }
+  const byTipo = (tipo, titulo, vazio) => {
+    const res = rows.filter(r=>r.tipo===tipo);
+    return res.length ? titulo+'\n\n'+cut(res.map(r=>fmtRow(r)),8) : vazio;
+  };
+  if (/demanda|solicit|pedid|necessidade/.test(q)) return byTipo('demanda','Demandas e necessidades registradas:','Não identifiquei demandas explícitas nas atas.');
+  if (/sugest|proposta|ideia/.test(q)) return byTipo('sugestão','Sugestões e propostas (ainda não deliberadas):','Não identifiquei sugestões ou propostas nas atas.');
+  if (/problema|dificuldade|reclama|preocupa/.test(q)) {
+    const res = rows.filter(r=>r.tipo==='problema');
+    if(!res.length) return 'Não identifiquei problemas explícitos nas atas.';
+    const porAssunto = {};
+    res.forEach(r=>{ const k=r.item.assunto||'Sem assunto identificado'; porAssunto[k]=(porAssunto[k]||0)+1; });
+    const rank = Object.entries(porAssunto).sort((x,y)=>y[1]-x[1]).slice(0,5).map(([k,n])=>`• ${k}: ${n}`).join('\n');
+    return 'Problemas relatados, por assunto:\n\n'+rank+'\n\nOcorrências:\n\n'+cut(res.map(r=>fmtRow(r)),6);
+  }
+  if (/decis|deliber|aprov/.test(q)) return byTipo('decisão','Decisões registradas:','Não identifiquei decisões nas atas.');
+  if (/encaminh|acao|acoes|tarefa/.test(q)) return byTipo('encaminhamento','Encaminhamentos registrados:','Não identifiquei encaminhamentos nas atas.');
+
+  // quem é responsável / o que cabe a <nome>
+  const qWords = new Set((q.match(/[a-z0-9]+/g)||[]).filter(w=>w.length>2 && !STOPWORDS.has(w)));
+  if(!qWords.size) return 'Tente reformular a pergunta com palavras mais específicas (ex: "prazo", "assunto", "responsável").';
+  const hits = [];
+  rows.forEach(r=>{
+    const hay = norm(descOf(r.item)+' '+respLabel(r.item)+' '+(r.item.assunto||'')+' '+(r.item.acao||''));
+    let score=0; qWords.forEach(w=>{ if(hay.includes(w)) score++; });
+    if(score>0) hits.push({r, score});
   });
   hits.sort((x,y)=>y.score-x.score);
-
-  if(!hits.length) return 'Não encontrei trechos exatos. Tente usar termos que apareçam literalmente no texto ou faça perguntas usando os botões de sugestão acima.';
-
-  const lines = hits.slice(0,8).map(h=>{
-    const d = h.item.descricao||h.item;
-    const src = h.a.filename+(h.a.data?' — '+fmtDate(h.a.data):'');
-    return `• [${h.tipo}] ${d}\n  fonte: ${src}`;
-  });
-  return 'Encontrei os seguintes trechos relacionados nas atas:\n\n'+lines.join('\n\n');
+  if(!hits.length) return 'Não encontrei trechos relacionados. Tente usar termos que apareçam literalmente no texto ou use os botões de sugestão.';
+  return 'Encontrei os seguintes trechos relacionados nas atas:\n\n'+cut(hits.map(h=>'['+h.r.tipo+'] '+fmtRow(h.r, h.r.a.data?'\n  Data da ata: '+fmtDate(h.r.a.data):'').replace(/^• /,'')),8);
 }
 
 function submitQuestion(){

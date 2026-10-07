@@ -149,9 +149,6 @@ main{padding:36px 0 80px;}
 input[type=file]{display:none;}
 
 .filter-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 0 16px;}
-.seg{display:flex;background:var(--paper-2);border:1px solid var(--line);border-radius:20px;padding:3px;gap:2px;}
-.seg button{border:none;background:none;cursor:pointer;color:var(--slate);font-size:11.5px;font-weight:700;padding:6px 13px;border-radius:16px;transition:background .2s var(--ease),color .2s var(--ease);}
-.seg button[aria-pressed="true"]{background:var(--ink);color:var(--white);}
 .table-search{position:relative;flex:1;min-width:180px;}
 .table-search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--slate);}
 .table-search input{width:100%;border:1px solid var(--line);background:var(--white);border-radius:20px;padding:8px 14px 8px 32px;font-size:13px;color:var(--ink);}
@@ -162,7 +159,7 @@ input[type=file]{display:none;}
 .btn:disabled{opacity:.4;cursor:not-allowed;}
 
 .index-table-wrap{border:1px solid var(--line);border-radius:8px;overflow:hidden;overflow-x:auto;}
-table.index-table{width:100%;border-collapse:collapse;min-width:780px;}
+table.index-table{width:100%;border-collapse:collapse;min-width:700px;}
 table.index-table thead th{text-align:left;background:var(--ink);color:var(--paper);font-size:10.5px;font-weight:800;letter-spacing:.03em;padding:11px 14px;cursor:pointer;user-select:none;white-space:nowrap;}
 table.index-table thead th .sort-arrow{opacity:.35;margin-left:4px;font-size:9px;}
 table.index-table thead th.sorted .sort-arrow{opacity:1;color:var(--amber);}
@@ -367,3 +364,33 @@ footer p{font-size:11.5px;color:var(--slate);max-width:560px;line-height:1.6;mar
   .wordmark .wm-sub{display:none;}
   .kpi .n{font-size:24px;}
 }
+
+/* ============================================================
+   ARQUIVO — "Enviar atas" e "Índice de atas" lado a lado
+============================================================ */
+.arquivo-grid{margin-bottom:44px;display:grid;grid-template-columns:minmax(250px,320px) minmax(0,1fr);gap:32px;align-items:start;}
+.arquivo-col{min-width:0;}
+.col-upload{position:sticky;top:16px;}
+.col-upload .dropzone{padding:44px 18px;}
+@media (max-width:980px){
+  .arquivo-grid{grid-template-columns:1fr;gap:26px;}
+  .col-upload{position:static;}
+}
+
+/* ============================================================
+   DETALHE DA ATA — confiança, ação, referência temporal
+============================================================ */
+.conf{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin-left:6px;vertical-align:middle;background:var(--paper-3);color:var(--ink-soft);}
+.conf-alta{background:var(--teal-soft);color:var(--teal-deep);}
+.conf-baixa{background:var(--rose-soft);color:var(--rose);}
+.chip.sug{background:var(--plum-soft);color:var(--plum-deep);}
+.chip.dem{background:var(--paper-3);color:var(--ink-soft);}
+.item-card .acao{font-size:12.5px;color:var(--ink-soft);margin:2px 0 7px;}
+.item-card .acao b{color:var(--ink);font-weight:700;}
+.item-card .ctx{font-size:11px;color:var(--slate);margin-top:6px;font-style:italic;}
+.drawer-note{font-size:12px;color:var(--ink-soft);background:var(--paper-2);border-left:3px solid var(--amber);border-radius:6px;padding:9px 12px;margin:0 0 14px;}
+.drawer-note .btn{margin-top:8px;}
+.subj-list{list-style:none;margin:0 0 4px;padding:0;display:flex;flex-direction:column;gap:6px;}
+.subj-list li{font-size:13px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;}
+.subj-list .why{font-size:11px;color:var(--slate);}
+.subj-list .proc{font-size:10px;color:var(--slate);border:1px solid var(--line);border-radius:8px;padding:0 6px;}
