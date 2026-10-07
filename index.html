@@ -54,49 +54,54 @@
   <section class="view active" id="view-arquivo" role="tabpanel">
     <div id="banners"></div>
 
-    <div class="section-head">
-      <div><h2>Enviar atas</h2><p class="desc">PDF ou TXT · vários ficheiros de uma vez</p></div>
-    </div>
-    <div class="dropzone tick-corner" id="dropzone">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4 7 9M12 4l5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
-      <p><strong>Clique para escolher ficheiros</strong> ou arraste e solte aqui</p>
-    </div>
-    <input type="file" id="file-input" multiple accept=".pdf,.txt,application/pdf,text/plain">
+    <div class="arquivo-grid">
 
-    <div class="section-head" style="margin-top:38px;">
-      <div><h2>Índice de atas</h2><p class="desc">Tudo o que já foi processado — clique numa linha para ver os detalhes</p></div>
-      <button class="btn" id="export-btn">
-        <svg class="icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3v9m0 0-3.2-3.2M10 12l3.2-3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 14v1.5A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V14"/></svg>
-        Exportar JSON
-      </button>
-    </div>
-    <div class="filter-bar">
-      <div class="seg" id="status-filter">
-        <button data-status="all" aria-pressed="true">Todas</button>
-        <button data-status="concluido" aria-pressed="false">Concluídas</button>
-        <button data-status="parcial" aria-pressed="false">Parciais</button>
-      </div>
-      <div class="table-search">
-        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="9" r="6.2"/><line x1="13.5" y1="13.5" x2="17.5" y2="17.5" stroke-linecap="round"/></svg>
-        <input type="text" id="search-input" placeholder="Buscar por ficheiro, reunião ou assunto…">
-      </div>
-      <span class="filter-count" id="filter-count"></span>
-    </div>
-    <div class="index-table-wrap">
-      <table class="index-table">
-        <thead>
-          <tr>
-            <th data-key="filename">Ficheiro <span class="sort-arrow">▲</span></th>
-            <th data-key="reuniao">Reunião <span class="sort-arrow">▲</span></th>
-            <th data-key="data">Data <span class="sort-arrow">▲</span></th>
-            <th data-key="decisoes">Decisões <span class="sort-arrow">▲</span></th>
-            <th data-key="encaminhamentos">Encam. <span class="sort-arrow">▲</span></th>
-            <th data-key="uploadedAt">Enviada em <span class="sort-arrow">▲</span></th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="ata-tbody"></tbody>
-      </table>
+      <!-- ENVIAR ATAS (esquerda) -->
+      <section class="arquivo-col col-upload" aria-label="Enviar atas">
+        <div class="section-head">
+          <div><h2>Enviar atas</h2><p class="desc">PDF ou TXT · vários ficheiros de uma vez</p></div>
+        </div>
+        <div class="dropzone tick-corner" id="dropzone">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4 7 9M12 4l5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+          <p><strong>Clique para escolher ficheiros</strong> ou arraste e solte aqui</p>
+        </div>
+        <input type="file" id="file-input" multiple accept=".pdf,.txt,application/pdf,text/plain">
+      </section>
+
+      <!-- ÍNDICE DE ATAS (direita) -->
+      <section class="arquivo-col col-index" aria-label="Índice de atas">
+        <div class="section-head">
+          <div><h2>Índice de atas</h2><p class="desc">Tudo o que já foi processado — clique numa linha para ver os detalhes</p></div>
+          <button class="btn" id="export-btn">
+            <svg class="icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 3v9m0 0-3.2-3.2M10 12l3.2-3.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 14v1.5A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5V14"/></svg>
+            Exportar JSON
+          </button>
+        </div>
+        <div class="filter-bar">
+          <div class="table-search">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="9" cy="9" r="6.2"/><line x1="13.5" y1="13.5" x2="17.5" y2="17.5" stroke-linecap="round"/></svg>
+            <input type="text" id="search-input" placeholder="Buscar por ficheiro…">
+          </div>
+          <span class="filter-count" id="filter-count"></span>
+        </div>
+        <div class="index-table-wrap">
+          <table class="index-table">
+            <thead>
+              <tr>
+                <th data-key="filename">Ficheiro <span class="sort-arrow">▲</span></th>
+                <th data-key="reuniao">Reunião <span class="sort-arrow">▲</span></th>
+                <th data-key="data">Data <span class="sort-arrow">▲</span></th>
+                <th data-key="decisoes">Decisões <span class="sort-arrow">▲</span></th>
+                <th data-key="encaminhamentos">Encam. <span class="sort-arrow">▲</span></th>
+                <th data-key="uploadedAt">Enviada em <span class="sort-arrow">▲</span></th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="ata-tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
     </div>
   </section>
 
@@ -218,6 +223,7 @@
 
 <div class="toast-stack" id="toast-stack"></div>
 
+<script src="js/extractor.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

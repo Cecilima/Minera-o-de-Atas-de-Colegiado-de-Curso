@@ -1,0 +1,14 @@
+const fs=require('fs'),E=require('../js/extractor.js');
+const f=process.argv[2];
+const r=E.extract(fs.readFileSync('atas/'+f,'utf8'));
+const show=(t,a,fn)=>{console.log('\n## '+t+' ('+a.length+')');a.forEach(x=>console.log('  - '+fn(x)))};
+console.log('Reunião:',r.reuniao,'| Data:',r.data,'| Estrutura:',JSON.stringify(r.estrutura));
+console.log('Participantes:',r.participantes.join('; '));
+show('ASSUNTOS',r.assuntosDetalhe,a=>`${a.titulo} [${a.origem}, ${a.nivel}${a.procedural?', procedural':''}] ${JSON.stringify(a.contagens)}`);
+const meta=x=>`conf=${x.confianca}`+(x.responsavel?` | resp=${x.responsavel}${x.cargo?'('+x.cargo+')':''}`:'')+(x.prazo?` | prazo="${x.prazo}"[${x.prazoTipo}]${x.prazoData?' data='+x.prazoData:''}`:'');
+show('DECISÕES',r.decisoes,x=>x.descricao.slice(0,90)+'\n      '+meta(x)+(x.assunto?` | assunto=${x.assunto}`:''));
+show('ENCAMINHAMENTOS',r.encaminhamentos,x=>x.descricao.slice(0,90)+'\n      ação="'+x.acao+'" '+meta(x)+(x.assunto?` | assunto=${x.assunto}`:''));
+show('PROBLEMAS',r.problemas,x=>x.descricao.slice(0,100));
+show('DEMANDAS',r.demandas,x=>x.descricao.slice(0,100));
+show('SUGESTÕES',r.sugestoes,x=>x.descricao.slice(0,100)+(x.proponente?' [por '+x.proponente+']':''));
+console.log('\nTermos:',r.termosRecorrentes.slice(0,8).map(t=>t.termo+':'+t.contagem).join(', '));
